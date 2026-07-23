@@ -327,7 +327,45 @@ function binarize(src){
 }
 
 /* ---------- 数字の切り出し ---------- */
+// 小さい塊（小数点・ゴミ）を消す。消した小数点のx位置を返す
+function cleanSmallBlobs(B){
+  const {bin,w,h}=B;
+  const lab=new Int32Array(w*h);
+  const comps=[]; let n=0; const stack=[];
+  for(let i=0;i<w*h;i++){
+    if(!bin[i] || lab[i]) continue;
+    n++; stack.length=0; stack.push(i); lab[i]=n;
+    let x0=i%w, x1=x0, y0=(i/w)|0, y1=y0;
+    while(stack.length){
+      const p=stack.pop(), px=p%w, py=(p/w)|0;
+      if(px<x0)x0=px; if(px>x1)x1=px; if(py<y0)y0=py; if(py>y1)y1=py;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const qx=px+dx, qy=py+dy;
+        if(qx<0||qy<0||qx>=w||qy>=h) continue;
+        const q=qy*w+qx;
+        if(bin[q] && !lab[q]){ lab[q]=n; stack.push(q); }
+      }
+    }
+    comps.push({id:n, x0,x1,y0,y1, w:x1-x0+1, h:y1-y0+1});
+  }
+  if(!comps.length) return [];
+  const maxH=Math.max(...comps.map(c=>c.h));
+  const dots=[];
+  const kill=new Set();
+  for(const c of comps){
+    if(c.h < maxH*0.30 && c.w < maxH*0.35){    // 上下も左右も小さい＝小数点かゴミ
+      kill.add(c.id);
+      if(c.y0 > h*0.45) dots.push((c.x0+c.x1)/2);   // 下寄りなら小数点とみなす
+    }
+  }
+  if(kill.size){
+    for(let i=0;i<w*h;i++) if(lab[i] && kill.has(lab[i])) bin[i]=0;
+  }
+  dots.sort((a,b)=>a-b);
+  return dots;
+}
 function segmentDigits(B){
+  B.dots = cleanSmallBlobs(B);
   const {bin,w,h}=B;
   const col=new Int32Array(w);
   for(let x=0;x<w;x++){ let c=0; for(let y=0;y<h;y++) if(bin[y*w+x]) c++; col[x]=c; }
@@ -389,29 +427,35 @@ function readFrame(){
   const boxes=segmentDigits(B);
   if(!boxes.length) return {ok:false, why:'数字が見つからない', B, boxes:[]};
   const maxH=Math.max(...boxes.map(b=>b.h));
-  let text='', dotAt=-1, bad=0;
+  let text='', bad=0; const charBoxes=[];
   for(const b of boxes){
-    if(b.h < maxH*0.40){                      // 背の低い塊＝小数点かマイナス
-      if(b.w < maxH*0.35){ if(text) dotAt=text.length; b.kind='dot'; }
-      else { text += '-'; b.kind='minus'; }
+    if(b.h < maxH*0.40){                      // 背の低い塊
+      if(b.w >= maxH*0.35){ text+='-'; b.kind='minus'; charBoxes.push(b); }
+      else b.kind='点';
       continue;
     }
     if(b.h < maxH*0.75){ b.kind='skip'; continue; }           // 「°C」など小さい表記は無視
     if(b.w < maxH*0.32){                                       // 細長い＝1、ただし端に接していれば枠線
       if(b.x0<=1 || b.x1>=B.w-2){ b.kind='枠線'; continue; }
-      text+='1'; b.kind='1'; continue;
+      text+='1'; b.kind='1'; charBoxes.push(b); continue;
     }
     const d=decodeDigit(B,b);
     if(d===null){ bad++; text+='?'; b.kind='?'; }
     else { text+=d; b.kind=d; }
+    charBoxes.push(b);
   }
   const digits=text.replace('-','');
   if(bad || !digits.length || digits.includes('?')) return {ok:false, why:'判読不能 '+(text||'-'), B, boxes, text};
   const mode=$('decimals').value;
   let str;
-  if(mode==='1') str = text.slice(0,-1)+'.'+text.slice(-1);
+  if(mode==='1') str = text.length>1 ? text.slice(0,-1)+'.'+text.slice(-1) : text;
   else if(mode==='0') str = text;
-  else str = dotAt>0 ? text.slice(0,dotAt)+'.'+text.slice(dotAt) : text;
+  else {
+    const dot=(B.dots||[])[0];
+    let k=-1;
+    if(dot!=null){ k=0; for(const b of charBoxes) if(b.x1 < dot) k++; }
+    str = (k>0 && k<text.length) ? text.slice(0,k)+'.'+text.slice(k) : text;
+  }
   const v=parseFloat(str);
   if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, B, boxes, text};
   return {ok:true, value:v, str, B, boxes, text};
