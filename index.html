@@ -459,9 +459,10 @@ function cleanSmallBlobs(B){
   const maxH=Math.max(...inner.map(c=>c.h));
   const dots=[];
   for(const c of inner){
-    if(c.h < maxH*0.30 && c.w < maxH*0.35){    // 上下も左右も小さい＝小数点かゴミ
+    // 小さい塊＝小数点・「°」・ゴミ。横に広い塊は数字の一部なので残す
+    if(c.h < maxH*0.50 && c.w < maxH*0.60){
       kill.add(c.id);
-      if(c.y0 > h*0.45) dots.push((c.x0+c.x1)/2);   // 下寄りなら小数点とみなす
+      if(c.h < maxH*0.30 && c.w < maxH*0.35 && c.y0 > h*0.45) dots.push((c.x0+c.x1)/2);
     }
   }
   if(kill.size){
@@ -482,11 +483,10 @@ function segmentDigits(B){
     else if(st>=0){ groups.push([st,x-1]); st=-1; }
   }
   if(st>=0) groups.push([st,w-1]);
-  // 近すぎる塊は結合（間隔は数字の高さを基準にする）
-  const gap = Math.max(1, Math.round(h*0.05));
+  // 隣り合う塊は結合しない。小数点を数字に巻き込むため
   const merged=[];
   for(const g of groups){
-    if(merged.length && g[0]-merged[merged.length-1][1] <= gap) merged[merged.length-1][1]=g[1];
+    if(merged.length && g[0]-merged[merged.length-1][1] <= 1) merged[merged.length-1][1]=g[1];
     else merged.push([...g]);
   }
   // 各塊の上下範囲
@@ -500,7 +500,25 @@ function segmentDigits(B){
     }
     if(y0<0) continue;
     if(ink < h*0.6) continue;            // ごま塩ノイズを捨てる
-    boxes.push({x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1,ink});
+    const box={x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1,ink};
+    // 万一くっついていた場合の保険：下側にしかインクがない列を端から削る
+    const colTop=(x)=>{ for(let y=box.y0;y<=box.y1;y++) if(bin[y*w+x]) return y; return Infinity; };
+    const low = box.y0 + box.h*0.62;
+    let nx1=box.x1, nx0=box.x0;
+    while(nx1>nx0 && colTop(nx1)>low) nx1--;
+    while(nx0<nx1 && colTop(nx0)>low) nx0++;
+    const cut=(box.x1-nx1)+(nx0-box.x0);
+    if(cut>0 && cut < box.w*0.45){
+      if(box.x1-nx1>0) B.dots.push((nx1+box.x1)/2);
+      box.x0=nx0; box.x1=nx1; box.w=nx1-nx0+1;
+      let ny0=-1,ny1=-1;
+      for(let y=0;y<h;y++){
+        let c=0; for(let x=box.x0;x<=box.x1;x++) if(bin[y*w+x]) c++;
+        if(c>=1){ if(ny0<0) ny0=y; ny1=y; }
+      }
+      if(ny0>=0){ box.y0=ny0; box.y1=ny1; box.h=ny1-ny0+1; }
+    }
+    boxes.push(box);
   }
   return boxes;
 }
