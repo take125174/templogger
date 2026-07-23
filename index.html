@@ -137,7 +137,7 @@
     </select>
   </label>
   <label class="ctl"><span>二値化しきい値</span><input type="range" id="thOff" min="-60" max="60" value="0"><output id="thOffV">0</output></label>
-  <label class="ctl"><span>点灯判定</span><input type="range" id="segTh" min="15" max="60" value="32"><output id="segThV">32%</output></label>
+  <label class="ctl"><span>判定の厳しさ</span><input type="range" id="segTh" min="2" max="30" value="8"><output id="segThV">8%</output></label>
   <label class="ctl"><span>小数点</span>
     <select id="decimals">
       <option value="1" selected>末尾1桁を小数（30.1）</option>
@@ -430,95 +430,115 @@ function binarize(src){
 }
 
 /* ---------- 数字の切り出し ---------- */
-// 小さい塊（小数点・ゴミ）を消す。消した小数点のx位置を返す
-function cleanSmallBlobs(B){
-  const {bin,w,h}=B;
-  const lab=new Int32Array(w*h);
-  const comps=[]; let n=0; const stack=[];
+// 二値画像の連結した塊を列挙する
+function blobs(bin,w,h){
+  const lab=new Int32Array(w*h); const cs=[]; let n=0; const st=[];
   for(let i=0;i<w*h;i++){
-    if(!bin[i] || lab[i]) continue;
-    n++; stack.length=0; stack.push(i); lab[i]=n;
-    let x0=i%w, x1=x0, y0=(i/w)|0, y1=y0;
-    while(stack.length){
-      const p=stack.pop(), px=p%w, py=(p/w)|0;
+    if(!bin[i]||lab[i]) continue;
+    n++; st.length=0; st.push(i); lab[i]=n;
+    let x0=i%w,x1=x0,y0=(i/w)|0,y1=y0;
+    while(st.length){
+      const p=st.pop(), px=p%w, py=(p/w)|0;
       if(px<x0)x0=px; if(px>x1)x1=px; if(py<y0)y0=py; if(py>y1)y1=py;
       for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
         const qx=px+dx, qy=py+dy;
         if(qx<0||qy<0||qx>=w||qy>=h) continue;
         const q=qy*w+qx;
-        if(bin[q] && !lab[q]){ lab[q]=n; stack.push(q); }
+        if(bin[q]&&!lab[q]){ lab[q]=n; st.push(q); }
       }
     }
-    comps.push({id:n, x0,x1,y0,y1, w:x1-x0+1, h:y1-y0+1});
+    cs.push({id:n,x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1});
   }
-  if(!comps.length) return [];
-  const inner = comps.filter(c => !(c.x0<=0 || c.y0<=0 || c.x1>=w-1 || c.y1>=h-1));
+  return {lab,comps:cs};
+}
+
+// 液晶の縁や影（画像の端に接する塊）を消す
+function removeBorderBlobs(B){
+  const {bin,w,h}=B;
+  const {lab,comps}=blobs(bin,w,h);
   const kill=new Set();
-  for(const c of comps) if(!inner.includes(c)) kill.add(c.id);   // 端に接する塊＝液晶の縁や影
-  if(!inner.length){ for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0; return []; }
-  const maxH=Math.max(...inner.map(c=>c.h));
-  const dots=[];
-  for(const c of inner){
-    // 小さい塊＝小数点・「°」・ゴミ。横に広い塊は数字の一部なので残す
-    if(c.h < maxH*0.50 && c.w < maxH*0.60){
+  for(const c of comps) if(c.x0<=0||c.y0<=0||c.x1>=w-1||c.y1>=h-1) kill.add(c.id);
+  if(kill.size) for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0;
+}
+
+// この液晶の数字は斜体。傾きを推定して打ち消す
+function deskew(B){
+  const {bin,w,h}=B;
+  const pts=[];
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++) if(bin[y*w+x]) pts.push(x,y);
+  if(pts.length<20) return 0;
+  let bestS=0, bestScore=-1;
+  const pad=Math.ceil(0.4*h)+2, W2=w+pad*2;
+  const col=new Float64Array(W2);
+  for(let si=-20;si<=20;si++){
+    const sVal=si*0.02;
+    col.fill(0);
+    for(let i=0;i<pts.length;i+=2){
+      const x=pts[i], y=pts[i+1];
+      const nx=(x - sVal*(y-h/2) + pad)|0;
+      if(nx>=0&&nx<W2) col[nx]++;
+    }
+    let sc=0; for(let i=0;i<W2;i++) sc+=col[i]*col[i];   // 列に集中するほど良い
+    if(sc>bestScore){ bestScore=sc; bestS=sVal; }
+  }
+  const out=new Uint8Array(W2*h);
+  for(let i=0;i<pts.length;i+=2){
+    const x=pts[i], y=pts[i+1];
+    const nx=(x - bestS*(y-h/2) + pad)|0;
+    if(nx>=0&&nx<W2) out[y*W2+nx]=1;
+  }
+  // 1画素の隙間を埋める（傾き補正で線が途切れるのを防ぐ）
+  for(let y=0;y<h;y++) for(let x=1;x<W2-1;x++){
+    const i=y*W2+x;
+    if(!out[i] && out[i-1] && out[i+1]) out[i]=1;
+  }
+  B.bin=out; B.w=W2; B.shear=bestS;
+  return bestS;
+}
+
+// 小さい塊（小数点・「°」・ゴミ）を消す。消した小数点のx位置を返す
+function removeSmallBlobs(B){
+  const {bin,w,h}=B;
+  const {lab,comps}=blobs(bin,w,h);
+  if(!comps.length){ B.comps=[]; return []; }
+  const maxH=Math.max(...comps.map(c=>c.h));
+  const kill=new Set(); const dots=[];
+  for(const c of comps){
+    if(c.h<maxH*0.50 && c.w<maxH*0.60){      // 横に広い塊は数字の一部なので残す
       kill.add(c.id);
-      if(c.h < maxH*0.30 && c.w < maxH*0.35 && c.y0 > h*0.45) dots.push((c.x0+c.x1)/2);
+      if(c.h<maxH*0.30 && c.w<maxH*0.35 && c.y0>h*0.45) dots.push((c.x0+c.x1)/2);
     }
   }
-  if(kill.size){
-    for(let i=0;i<w*h;i++) if(lab[i] && kill.has(lab[i])) bin[i]=0;
-  }
+  if(kill.size) for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0;
   dots.sort((a,b)=>a-b);
+  B.comps=comps.filter(c=>!kill.has(c.id));
   return dots;
 }
+
 function segmentDigits(B){
-  B.dots = cleanSmallBlobs(B);
+  removeBorderBlobs(B);
+  deskew(B);
+  B.dots = removeSmallBlobs(B);
   const {bin,w,h}=B;
   const col=new Int32Array(w);
   for(let x=0;x<w;x++){ let c=0; for(let y=0;y<h;y++) if(bin[y*w+x]) c++; col[x]=c; }
-  const minCol = Math.max(1, Math.round(h*0.06));
+  const minCol=Math.max(1,Math.round(h*0.05));
   const groups=[]; let st=-1;
   for(let x=0;x<w;x++){
     if(col[x]>=minCol){ if(st<0) st=x; }
     else if(st>=0){ groups.push([st,x-1]); st=-1; }
   }
   if(st>=0) groups.push([st,w-1]);
-  // 隣り合う塊は結合しない。小数点を数字に巻き込むため
-  const merged=[];
-  for(const g of groups){
-    if(merged.length && g[0]-merged[merged.length-1][1] <= 1) merged[merged.length-1][1]=g[1];
-    else merged.push([...g]);
-  }
-  // 各塊の上下範囲
   const boxes=[];
-  for(const [x0,x1] of merged){
+  for(const [x0,x1] of groups){
     let y0=-1,y1=-1,ink=0;
     for(let y=0;y<h;y++){
       let c=0; for(let x=x0;x<=x1;x++) if(bin[y*w+x]) c++;
       ink+=c;
-      if(c >= Math.max(1, Math.round((x1-x0+1)*0.08))){ if(y0<0) y0=y; y1=y; }
+      if(c>=1){ if(y0<0) y0=y; y1=y; }
     }
-    if(y0<0) continue;
-    if(ink < h*0.6) continue;            // ごま塩ノイズを捨てる
-    const box={x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1,ink};
-    // 万一くっついていた場合の保険：下側にしかインクがない列を端から削る
-    const colTop=(x)=>{ for(let y=box.y0;y<=box.y1;y++) if(bin[y*w+x]) return y; return Infinity; };
-    const low = box.y0 + box.h*0.62;
-    let nx1=box.x1, nx0=box.x0;
-    while(nx1>nx0 && colTop(nx1)>low) nx1--;
-    while(nx0<nx1 && colTop(nx0)>low) nx0++;
-    const cut=(box.x1-nx1)+(nx0-box.x0);
-    if(cut>0 && cut < box.w*0.45){
-      if(box.x1-nx1>0) B.dots.push((nx1+box.x1)/2);
-      box.x0=nx0; box.x1=nx1; box.w=nx1-nx0+1;
-      let ny0=-1,ny1=-1;
-      for(let y=0;y<h;y++){
-        let c=0; for(let x=box.x0;x<=box.x1;x++) if(bin[y*w+x]) c++;
-        if(c>=1){ if(ny0<0) ny0=y; ny1=y; }
-      }
-      if(ny0>=0){ box.y0=ny0; box.y1=ny1; box.h=ny1-ny0+1; }
-    }
-    boxes.push(box);
+    if(y0<0 || ink<h*0.4) continue;
+    boxes.push({x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1,ink});
   }
   return boxes;
 }
@@ -532,17 +552,30 @@ function decodeDigit(B, box){
     a:[.20,.00,.60,.18], b:[.72,.10,.28,.36], c:[.72,.54,.28,.36], d:[.20,.82,.60,.18],
     e:[.00,.54,.28,.36], f:[.00,.10,.28,.36], g:[.20,.41,.60,.18]
   };
-  const need = Number($('segTh').value)/100;
-  let bits='';
+  const sc=[];
   for(const k of ['a','b','c','d','e','f','g']){
     const r=rects[k];
     const rx0=box.x0+Math.round(r[0]*box.w), rx1=box.x0+Math.round((r[0]+r[2])*box.w)-1;
     const ry0=box.y0+Math.round(r[1]*box.h), ry1=box.y0+Math.round((r[1]+r[3])*box.h)-1;
     let on=0,tot=0;
     for(let y=ry0;y<=ry1;y++) for(let x=rx0;x<=rx1;x++){ tot++; if(bin[y*w+x]) on++; }
-    bits += (tot && on/tot>=need) ? '1':'0';
+    sc.push(tot? on/tot : 0);
   }
-  return SEGMAP[bits] || null;
+  // 点灯度を0〜1に正規化し、0〜9のパターンとの近さで判定する
+  const lo=Math.min(...sc), hi=Math.max(...sc);
+  if(hi-lo < 0.05) return {digit:null, margin:0};
+  const nm=sc.map(v=>(v-lo)/(hi-lo));
+  const res=[];
+  for(const pat in SEGMAP){
+    let d=0;
+    for(let i=0;i<7;i++) d += Math.abs(nm[i] - (pat[i]==='1'?1:0));
+    res.push({digit:SEGMAP[pat], dist:d/7});
+  }
+  res.sort((a,b)=>a.dist-b.dist);
+  const margin = res[1].dist - res[0].dist;   // 2位との差＝どれだけ自信があるか
+  const need = Number($('segTh').value)/100;
+  if(margin < need) return {digit:null, margin};
+  return {digit:res[0].digit, margin};
 }
 function readFrame(){
   const src=grabROI();
@@ -563,9 +596,9 @@ function readFrame(){
       if(b.x0<=1 || b.x1>=B.w-2){ b.kind='枠線'; continue; }
       text+='1'; b.kind='1'; charBoxes.push(b); continue;
     }
-    const d=decodeDigit(B,b);
-    if(d===null){ bad++; text+='?'; b.kind='?'; }
-    else { text+=d; b.kind=d; }
+    const res=decodeDigit(B,b);
+    if(res.digit===null){ bad++; text+='?'; b.kind='?'+res.margin.toFixed(2); }
+    else { text+=res.digit; b.kind=res.digit; }
     charBoxes.push(b);
   }
   const digits=text.replace('-','');
@@ -594,7 +627,9 @@ function burstRead(){
   const keys=Object.keys(votes);
   if(!keys.length) return last;
   keys.sort((a,b)=>votes[b]-votes[a]);
-  if(n>1 && votes[keys[0]] < Math.ceil(n/2)) return {ok:false, why:'値がばらつく', B:last.B, boxes:last.boxes};
+  let okCount=0; for(const k of keys) okCount+=votes[k];
+  // 読めたフレームどうしで多数決する。読めなかったフレームは数に入れない
+  if(okCount>1 && votes[keys[0]] < Math.ceil(okCount/2)) return {ok:false, why:'値がばらつく', B:last.B, boxes:last.boxes};
   return {ok:true, value:Number(keys[0]), str:keys[0], B:last.B, boxes:last.boxes};
 }
 
