@@ -99,6 +99,12 @@
 
 <div class="card">
   <div class="eyebrow">カメラ / 読み取り枠</div>
+  <label class="ctl"><span>枠の決め方</span>
+    <select id="mode">
+      <option value="auto" selected>自動追従（緑の本体を探す）</option>
+      <option value="manual">手動枠</option>
+    </select>
+  </label>
   <div id="stage">
     <video id="video" playsinline muted autoplay></video>
     <canvas id="overlay"></canvas>
@@ -223,12 +229,15 @@ function drawOverlay(){
   fitOverlay();
   const W = overlay.width/(window.devicePixelRatio||1), H = overlay.height/(window.devicePixelRatio||1);
   octx.clearRect(0,0,W,H);
-  const x=S.roi.x*W, y=S.roi.y*H, w=S.roi.w*W, h=S.roi.h*H;
+  const R = (typeof currentRect==='function') ? currentRect() : S.roi;
+  const auto = $('mode') && $('mode').value==='auto';
+  const x=R.x*W, y=R.y*H, w=R.w*W, h=R.h*H;
   octx.fillStyle='rgba(0,0,0,.45)';
   octx.fillRect(0,0,W,y); octx.fillRect(0,y+h,W,H-y-h);
   octx.fillRect(0,y,x,h); octx.fillRect(x+w,y,W-x-w,h);
-  octx.strokeStyle='#33c76e'; octx.lineWidth=2; octx.strokeRect(x,y,w,h);
-  octx.fillStyle='#33c76e'; octx.fillRect(x+w-16,y+h-16,16,16);
+  octx.strokeStyle = auto ? '#e8b230' : '#33c76e';
+  octx.lineWidth=2; octx.strokeRect(x,y,w,h);
+  if(!auto){ octx.fillStyle='#33c76e'; octx.fillRect(x+w-16,y+h-16,16,16); }
   requestAnimationFrame(()=>{});
 }
 window.addEventListener('resize', drawOverlay);
@@ -285,11 +294,105 @@ for(const id of ['roiX','roiY','roiW','roiH']){
 }
 
 /* ---------- 画像取得と二値化 ---------- */
+/* ---------- 自動追従：緑の本体の内側にある窓を探す ---------- */
+const scan = document.createElement('canvas'), sctx = scan.getContext('2d', {willReadFrequently:true});
+let found = null, foundAt = 0;
+
+function labelMask(mask, w, h){
+  const lab=new Int32Array(w*h); const comps=[]; let n=0; const st=[];
+  for(let i=0;i<w*h;i++){
+    if(!mask[i] || lab[i]) continue;
+    n++; st.length=0; st.push(i); lab[i]=n;
+    let x0=i%w,x1=x0,y0=(i/w)|0,y1=y0,area=0;
+    while(st.length){
+      const p=st.pop(), px=p%w, py=(p/w)|0; area++;
+      if(px<x0)x0=px; if(px>x1)x1=px; if(py<y0)y0=py; if(py>y1)y1=py;
+      const nb=[p-1,p+1,p-w,p+w];
+      if(px>0 && mask[nb[0]] && !lab[nb[0]]){ lab[nb[0]]=n; st.push(nb[0]); }
+      if(px<w-1 && mask[nb[1]] && !lab[nb[1]]){ lab[nb[1]]=n; st.push(nb[1]); }
+      if(py>0 && mask[nb[2]] && !lab[nb[2]]){ lab[nb[2]]=n; st.push(nb[2]); }
+      if(py<h-1 && mask[nb[3]] && !lab[nb[3]]){ lab[nb[3]]=n; st.push(nb[3]); }
+    }
+    comps.push({id:n,x0,y0,x1,y1,area,w:x1-x0+1,h:y1-y0+1});
+  }
+  return {lab, comps};
+}
+
+// 動画フレームから液晶窓を探し、0〜1の正規化矩形を返す
+function detectWindow(){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  if(!vw) return null;
+  const W=320, H=Math.max(8, Math.round(vh*320/vw));
+  scan.width=W; scan.height=H;
+  sctx.drawImage(video,0,0,W,H);
+  const d=sctx.getImageData(0,0,W,H).data;
+  const N=W*H;
+  const green=new Uint8Array(N), lum=new Uint8Array(N);
+  let gc=0;
+  for(let i=0;i<N;i++){
+    const r=d[i*4], g=d[i*4+1], b=d[i*4+2];
+    lum[i]=(r*0.299+g*0.587+b*0.114)|0;
+    if(g-r>20 && g-b>20){ green[i]=1; gc++; }
+  }
+  if(gc < N*0.01) return null;
+  const G=labelMask(green,W,H);
+  let body=null;
+  for(const c of G.comps) if(!body || c.area>body.area) body=c;
+  if(!body) return null;
+  // 本体の外側を塗りつぶし、残った未到達の非本体領域＝内側の穴
+  const isBody=new Uint8Array(N);
+  for(let i=0;i<N;i++) if(G.lab[i]===body.id) isBody[i]=1;
+  const out=new Uint8Array(N); const st=[];
+  for(let x=0;x<W;x++){ st.push(x); st.push((H-1)*W+x); }
+  for(let y=0;y<H;y++){ st.push(y*W); st.push(y*W+W-1); }
+  while(st.length){
+    const p=st.pop();
+    if(p<0||p>=N||out[p]||isBody[p]) continue;
+    out[p]=1;
+    const px=p%W, py=(p/W)|0;
+    if(px>0)st.push(p-1); if(px<W-1)st.push(p+1);
+    if(py>0)st.push(p-W); if(py<H-1)st.push(p+W);
+  }
+  const holes=new Uint8Array(N);
+  for(let i=0;i<N;i++) if(!isBody[i] && !out[i]) holes[i]=1;
+  const Hc=labelMask(holes,W,H);
+  let best=null;
+  for(const c of Hc.comps){
+    if(c.area < body.area*0.02) continue;
+    const ar=c.w/c.h;
+    if(ar<0.8 || ar>6) continue;
+    let s=0,n2=0;
+    for(let y=c.y0;y<=c.y1;y++) for(let x=c.x0;x<=c.x1;x++){
+      const i=y*W+x; if(Hc.lab[i]===c.id){ s+=lum[i]; n2++; }
+    }
+    const bright=n2?s/n2:0;
+    if(!best || bright>best.bright) best={c, bright};   // 明るいほうが液晶、暗いほうがソーラー
+  }
+  if(!best) return null;
+  const c=best.c;
+  return { x:c.x0/W, y:c.y0/H, w:(c.x1-c.x0+1)/W, h:(c.y1-c.y0+1)/H };
+}
+function currentRect(){
+  if($('mode').value==='manual') return S.roi;
+  const now=Date.now();
+  if(!found || now-foundAt>400){
+    const r=detectWindow();
+    if(r){ found=r; foundAt=now; }
+  }
+  return found || S.roi;
+}
+
 function grabROI(){
   const vw = video.videoWidth, vh = video.videoHeight;
   if(!vw) return null;
-  const sx=Math.round(S.roi.x*vw), sy=Math.round(S.roi.y*vh);
-  const sw=Math.max(8,Math.round(S.roi.w*vw)), sh=Math.max(8,Math.round(S.roi.h*vh));
+  const R = currentRect();
+  let rx=R.x, ry=R.y, rw=R.w, rh=R.h;
+  if($('mode').value==='auto'){        // 白い縁の内側まで少し詰める
+    const ix=rw*0.06, iy=rh*0.10;
+    rx+=ix; ry+=iy; rw-=ix*2; rh-=iy*2;
+  }
+  const sx=Math.round(rx*vw), sy=Math.round(ry*vh);
+  const sw=Math.max(8,Math.round(rw*vw)), sh=Math.max(8,Math.round(rh*vh));
   // 高さを基準に拡大する。横長の枠でも数字の解像度が落ちない
   let th=90, tw=Math.max(8, Math.round(sw*th/sh));
   if(tw>640){ tw=640; th=Math.max(8, Math.round(sh*640/sw)); }
@@ -349,10 +452,13 @@ function cleanSmallBlobs(B){
     comps.push({id:n, x0,x1,y0,y1, w:x1-x0+1, h:y1-y0+1});
   }
   if(!comps.length) return [];
-  const maxH=Math.max(...comps.map(c=>c.h));
-  const dots=[];
+  const inner = comps.filter(c => !(c.x0<=0 || c.y0<=0 || c.x1>=w-1 || c.y1>=h-1));
   const kill=new Set();
-  for(const c of comps){
+  for(const c of comps) if(!inner.includes(c)) kill.add(c.id);   // 端に接する塊＝液晶の縁や影
+  if(!inner.length){ for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0; return []; }
+  const maxH=Math.max(...inner.map(c=>c.h));
+  const dots=[];
+  for(const c of inner){
     if(c.h < maxH*0.30 && c.w < maxH*0.35){    // 上下も左右も小さい＝小数点かゴミ
       kill.add(c.id);
       if(c.y0 > h*0.45) dots.push((c.x0+c.x1)/2);   // 下寄りなら小数点とみなす
@@ -661,6 +767,8 @@ for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventL
 syncLabels();
 roiToSliders();
 $('btnCam').onclick = initCamera;
+$('mode').addEventListener('change', ()=>{ found=null; drawOverlay(); saveMeta(); });
+setInterval(()=>{ if($('mode').value==='auto' && video.videoWidth) drawOverlay(); }, 500);
 load();
 initCamera();
 </script>
