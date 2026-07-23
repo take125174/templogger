@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>7セグ温度ロガー</title>
+<style>
+  :root{
+    --ink:#0d1210;
+    --panel:#161d1a;
+    --line:#2b3733;
+    --lcd:#b9bdb4;
+    --lcd-dark:#1a1c18;
+    --green:#1f8a4c;
+    --green-hi:#33c76e;
+    --amber:#e8b230;
+    --text:#dfe6e1;
+    --muted:#7e8d86;
+    --red:#d9634a;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --sans:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--ink);color:var(--text);font-family:var(--sans);-webkit-text-size-adjust:100%}
+  body{padding:14px 14px 60px;max-width:560px;margin:0 auto}
+  h1{font-size:15px;letter-spacing:.12em;text-transform:uppercase;margin:0 0 2px;font-weight:600}
+  .sub{font-size:11px;color:var(--muted);letter-spacing:.06em;margin-bottom:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px}
+  .eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-bottom:8px}
+
+  /* signature: the LCD plate, mirroring the device itself */
+  .plate{background:var(--green);border-radius:8px;padding:10px;display:flex;gap:10px;align-items:stretch}
+  .lcd{flex:1;background:var(--lcd);border:2px solid #fff;border-radius:5px;padding:6px 8px;text-align:right}
+  .lcd .val{font-family:var(--mono);font-size:44px;font-weight:700;color:var(--lcd-dark);line-height:1;letter-spacing:.02em}
+  .lcd .val small{font-size:18px;margin-left:3px}
+  .lcd .stamp{font-family:var(--mono);font-size:10px;color:#4a5049;margin-top:3px}
+  .cell{width:74px;background:#221f1a;border:2px solid #fff;border-radius:5px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px}
+  .cell b{font-family:var(--mono);font-size:17px;color:var(--amber);line-height:1}
+  .cell span{font-size:9px;color:#8d8578;letter-spacing:.1em}
+
+  #stage{position:relative;background:#000;border-radius:8px;overflow:hidden;line-height:0}
+  #video{width:100%;height:auto;display:block}
+  #overlay{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  button{flex:1;min-width:104px;background:#20302a;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:11px 8px;font-size:13px;font-family:var(--sans);font-weight:600;cursor:pointer}
+  button:active{background:#2a3f37}
+  button:disabled{opacity:.38}
+  button.primary{background:var(--green);border-color:var(--green-hi);color:#fff}
+  button.stop{background:#4a2420;border-color:#7a3a32;color:#f3c4bb}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+  label.ctl{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);margin:9px 0}
+  label.ctl span:first-child{flex:0 0 96px;color:var(--text)}
+  label.ctl output{font-family:var(--mono);flex:0 0 46px;text-align:right;color:var(--amber)}
+  input[type=range]{flex:1;accent-color:var(--green-hi)}
+  select{background:#20302a;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font-size:13px}
+
+  #debug{display:flex;gap:10px;align-items:center;margin-top:8px}
+  #dbgCanvas{background:#000;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;width:190px;height:auto}
+  #dbgText{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6}
+  #dbgText b{color:var(--green-hi);font-size:15px}
+
+  #chart{width:100%;height:170px;display:block}
+  .stats{display:flex;gap:14px;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:6px}
+  .stats b{color:var(--text)}
+
+  .note{font-size:11px;color:var(--muted);line-height:1.7;margin-top:8px}
+  .alert{background:#3a1f1a;border:1px solid #7a3a32;color:#f3c4bb;font-size:12px;line-height:1.7;padding:10px;border-radius:7px;margin-bottom:12px;display:none}
+  textarea{width:100%;height:120px;background:#0b0f0d;color:var(--muted);border:1px solid var(--line);border-radius:6px;font-family:var(--mono);font-size:10px;padding:8px;display:none;margin-top:8px}
+  @media (prefers-reduced-motion:no-preference){.rec{animation:blink 2s steps(2,end) infinite}}
+  @keyframes blink{50%{opacity:.25}}
+</style>
+</head>
+<body>
+
+<h1>7セグ温度ロガー</h1>
+<div class="sub">カメラで表示を読み、10秒ごとにCSVへ記録</div>
+
+<div class="alert" id="alert"></div>
+
+<div class="card">
+  <div class="plate">
+    <div class="lcd">
+      <div class="val" id="curVal">--.-<small>°C</small></div>
+      <div class="stamp" id="curStamp">未計測</div>
+    </div>
+    <div class="cell">
+      <b id="cntOk">0</b><span>記録</span>
+      <b id="cntNg" style="color:var(--red);margin-top:6px">0</b><span>失敗</span>
+    </div>
+  </div>
+  <div class="row">
+    <button id="btnStart" class="primary">記録を開始</button>
+    <button id="btnTest">1回テスト</button>
+    <button id="btnFit">枠を自動調整</button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="eyebrow">カメラ / 読み取り枠</div>
+  <div id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="overlay"></canvas>
+  </div>
+  <div class="row">
+    <button id="btnCam">カメラを開始</button>
+  </div>
+  <div class="note">枠を数字「30.1」だけにぴったり合わせます（°Cは入れない）。枠の中をドラッグで移動、右下の角をドラッグでサイズ変更。</div>
+  <div id="debug">
+    <canvas id="dbgCanvas" width="120" height="60"></canvas>
+    <div id="dbgText">読み取り結果<br><b id="dbgVal">--</b><br><span id="dbgInfo">まだ実行していません</span></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="eyebrow">設定</div>
+  <label class="ctl"><span>記録間隔</span>
+    <select id="interval">
+      <option value="5">5秒</option>
+      <option value="10" selected>10秒</option>
+      <option value="30">30秒</option>
+      <option value="60">60秒</option>
+    </select>
+  </label>
+  <label class="ctl"><span>二値化しきい値</span><input type="range" id="thOff" min="-60" max="60" value="0"><output id="thOffV">0</output></label>
+  <label class="ctl"><span>点灯判定</span><input type="range" id="segTh" min="15" max="60" value="32"><output id="segThV">32%</output></label>
+  <label class="ctl"><span>小数点</span>
+    <select id="decimals">
+      <option value="1" selected>末尾1桁を小数（30.1）</option>
+      <option value="0">小数なし（301）</option>
+      <option value="auto">画像の点を使う</option>
+    </select>
+  </label>
+  <label class="ctl"><span>連写枚数</span>
+    <select id="burst"><option value="1">1枚</option><option value="3" selected>3枚の多数決</option><option value="5">5枚の多数決</option></select>
+  </label>
+</div>
+
+<div class="card">
+  <div class="eyebrow">記録</div>
+  <canvas id="chart"></canvas>
+  <div class="stats">
+    <span>点数 <b id="stN">0</b></span>
+    <span>最低 <b id="stMin">-</b></span>
+    <span>最高 <b id="stMax">-</b></span>
+    <span>平均 <b id="stAvg">-</b></span>
+  </div>
+  <div class="row">
+    <button id="btnCsv">CSVを保存</button>
+    <button id="btnCopy">CSVを表示</button>
+    <button id="btnClear" class="stop">全消去</button>
+  </div>
+  <textarea id="csvOut" readonly></textarea>
+</div>
+
+<div class="card">
+  <div class="eyebrow">長時間記録のコツ</div>
+  <div class="note">
+    充電器につないだまま、スマホと温度計を両方とも動かないよう固定してください。記録中は画面の自動消灯を止めます（Wake Lock）が、他のアプリに切り替えるとカメラが止まります。<br>
+    データは自動保存され、閉じても次に開いたとき復元されます。照明が変わると読めなくなることがあるので、直射日光や影の動く場所は避けてください。
+  </div>
+</div>
+
+<script>
+/* ---------- 状態 ---------- */
+const S = {
+  roi: {x:0.25, y:0.40, w:0.50, h:0.18},   // 正規化座標
+  points: [],           // [ms, value]
+  flushed: 0,
+  running: false,
+  timer: null,
+  ok: 0, ng: 0,
+  fails: 0
+};
+const CHUNK = 360, FLUSH_EVERY = 30;
+
+const $ = id => document.getElementById(id);
+const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
+const work = document.createElement('canvas'), wctx = work.getContext('2d', {willReadFrequently:true});
+const dbg = $('dbgCanvas'), dctx = dbg.getContext('2d');
+
+function showAlert(msg){ const a=$('alert'); a.textContent=msg; a.style.display='block'; }
+
+/* ---------- カメラ ---------- */
+async function initCamera(){
+  if(!window.isSecureContext || !navigator.mediaDevices){
+    showAlert('このページはhttps://で開く必要があります。ファイルとして直接開いた場合、iPhoneではカメラを許可できません。');
+    return;
+  }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080} }, audio:false
+    });
+    video.srcObject = stream;
+    await video.play();
+    $('alert').style.display='none';
+    $('btnCam').textContent='カメラを開き直す';
+    drawOverlay();
+  }catch(e){
+    showAlert('カメラを開けません（' + e.name + '）。「カメラを開始」をもう一度押すか、Safariの設定でこのサイトのカメラを「許可」にしてください。');
+  }
+}
+document.addEventListener('DOMContentLoaded', ()=>{});
+
+/* ---------- ROI 操作 ---------- */
+function fitOverlay(){
+  const r = video.getBoundingClientRect();
+  if(!r.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  overlay.width = r.width*dpr; overlay.height = r.height*dpr;
+  overlay.style.height = r.height+'px';
+  octx.setTransform(dpr,0,0,dpr,0,0);
+}
+function drawOverlay(){
+  fitOverlay();
+  const W = overlay.width/(window.devicePixelRatio||1), H = overlay.height/(window.devicePixelRatio||1);
+  octx.clearRect(0,0,W,H);
+  const x=S.roi.x*W, y=S.roi.y*H, w=S.roi.w*W, h=S.roi.h*H;
+  octx.fillStyle='rgba(0,0,0,.45)';
+  octx.fillRect(0,0,W,y); octx.fillRect(0,y+h,W,H-y-h);
+  octx.fillRect(0,y,x,h); octx.fillRect(x+w,y,W-x-w,h);
+  octx.strokeStyle='#33c76e'; octx.lineWidth=2; octx.strokeRect(x,y,w,h);
+  octx.fillStyle='#33c76e'; octx.fillRect(x+w-16,y+h-16,16,16);
+  requestAnimationFrame(()=>{});
+}
+window.addEventListener('resize', drawOverlay);
+video.addEventListener('loadedmetadata', drawOverlay);
+
+let drag = null;
+overlay.addEventListener('pointerdown', e=>{
+  const r = overlay.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width, py=(e.clientY-r.top)/r.height;
+  const nearCorner = Math.abs(px-(S.roi.x+S.roi.w))<0.06 && Math.abs(py-(S.roi.y+S.roi.h))<0.09;
+  const inside = px>S.roi.x && px<S.roi.x+S.roi.w && py>S.roi.y && py<S.roi.y+S.roi.h;
+  if(nearCorner) drag={mode:'size', px, py, r0:{...S.roi}};
+  else if(inside) drag={mode:'move', px, py, r0:{...S.roi}};
+  if(drag) overlay.setPointerCapture(e.pointerId);
+});
+overlay.addEventListener('pointermove', e=>{
+  if(!drag) return;
+  const r = overlay.getBoundingClientRect();
+  const px=(e.clientX-r.left)/r.width, py=(e.clientY-r.top)/r.height;
+  const dx=px-drag.px, dy=py-drag.py;
+  if(drag.mode==='move'){
+    S.roi.x = Math.min(Math.max(drag.r0.x+dx,0), 1-drag.r0.w);
+    S.roi.y = Math.min(Math.max(drag.r0.y+dy,0), 1-drag.r0.h);
+  }else{
+    S.roi.w = Math.min(Math.max(drag.r0.w+dx,0.08), 1-S.roi.x);
+    S.roi.h = Math.min(Math.max(drag.r0.h+dy,0.04), 1-S.roi.y);
+  }
+  drawOverlay();
+});
+overlay.addEventListener('pointerup', ()=>{ if(drag){ drag=null; saveMeta(); } });
+
+/* ---------- 画像取得と二値化 ---------- */
+function grabROI(){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if(!vw) return null;
+  const sx=Math.round(S.roi.x*vw), sy=Math.round(S.roi.y*vh);
+  const sw=Math.max(8,Math.round(S.roi.w*vw)), sh=Math.max(8,Math.round(S.roi.h*vh));
+  const tw=180, th=Math.max(8, Math.round(sh*tw/sw));
+  work.width=tw; work.height=th;
+  wctx.drawImage(video, sx,sy,sw,sh, 0,0,tw,th);
+  const img = wctx.getImageData(0,0,tw,th).data;
+  const gray = new Uint8Array(tw*th);
+  for(let i=0;i<tw*th;i++){
+    gray[i] = (img[i*4]*0.299 + img[i*4+1]*0.587 + img[i*4+2]*0.114)|0;
+  }
+  return {gray, w:tw, h:th};
+}
+function otsu(gray){
+  const hist=new Array(256).fill(0);
+  for(const g of gray) hist[g]++;
+  const total=gray.length;
+  let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+  let sumB=0, wB=0, best=0, th=128;
+  for(let t=0;t<256;t++){
+    wB+=hist[t]; if(!wB) continue;
+    const wF=total-wB; if(!wF) break;
+    sumB+=t*hist[t];
+    const mB=sumB/wB, mF=(sum-sumB)/wF;
+    const v=wB*wF*(mB-mF)*(mB-mF);
+    if(v>best){best=v; th=t;}
+  }
+  return th;
+}
+function binarize(src){
+  const th = Math.max(1, Math.min(254, otsu(src.gray) + Number($('thOff').value)));
+  const bin = new Uint8Array(src.w*src.h);
+  for(let i=0;i<bin.length;i++) bin[i] = src.gray[i] < th ? 1 : 0;  // 黒い画素=インク
+  return {bin, w:src.w, h:src.h, th};
+}
+
+/* ---------- 数字の切り出し ---------- */
+function segmentDigits(B){
+  const {bin,w,h}=B;
+  const col=new Int32Array(w);
+  for(let x=0;x<w;x++){ let c=0; for(let y=0;y<h;y++) if(bin[y*w+x]) c++; col[x]=c; }
+  const minCol = Math.max(1, Math.round(h*0.06));
+  const groups=[]; let st=-1;
+  for(let x=0;x<w;x++){
+    if(col[x]>=minCol){ if(st<0) st=x; }
+    else if(st>=0){ groups.push([st,x-1]); st=-1; }
+  }
+  if(st>=0) groups.push([st,w-1]);
+  // 近すぎる塊は結合
+  const merged=[];
+  for(const g of groups){
+    if(merged.length && g[0]-merged[merged.length-1][1] <= Math.round(w*0.015)) merged[merged.length-1][1]=g[1];
+    else merged.push([...g]);
+  }
+  // 各塊の上下範囲
+  const boxes=[];
+  for(const [x0,x1] of merged){
+    let y0=-1,y1=-1;
+    for(let y=0;y<h;y++){
+      let c=0; for(let x=x0;x<=x1;x++) if(bin[y*w+x]) c++;
+      if(c >= Math.max(1, Math.round((x1-x0+1)*0.08))){ if(y0<0) y0=y; y1=y; }
+    }
+    if(y0<0) continue;
+    boxes.push({x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1});
+  }
+  return boxes;
+}
+const SEGMAP={
+  '1111110':'0','0110000':'1','1101101':'2','1111001':'3','0110011':'4',
+  '1011011':'5','1011111':'6','1110000':'7','1111111':'8','1111011':'9'
+};
+function decodeDigit(B, box){
+  const {bin,w}=B;
+  const rects={ // [x, y, width, height] を数字枠内の比率で指定
+    a:[.20,.00,.60,.18], b:[.72,.10,.28,.36], c:[.72,.54,.28,.36], d:[.20,.82,.60,.18],
+    e:[.00,.54,.28,.36], f:[.00,.10,.28,.36], g:[.20,.41,.60,.18]
+  };
+  const need = Number($('segTh').value)/100;
+  let bits='';
+  for(const k of ['a','b','c','d','e','f','g']){
+    const r=rects[k];
+    const rx0=box.x0+Math.round(r[0]*box.w), rx1=box.x0+Math.round((r[0]+r[2])*box.w)-1;
+    const ry0=box.y0+Math.round(r[1]*box.h), ry1=box.y0+Math.round((r[1]+r[3])*box.h)-1;
+    let on=0,tot=0;
+    for(let y=ry0;y<=ry1;y++) for(let x=rx0;x<=rx1;x++){ tot++; if(bin[y*w+x]) on++; }
+    bits += (tot && on/tot>=need) ? '1':'0';
+  }
+  return SEGMAP[bits] || null;
+}
+function readFrame(){
+  const src=grabROI();
+  if(!src) return {ok:false, why:'カメラ待ち'};
+  const B=binarize(src);
+  const boxes=segmentDigits(B);
+  if(!boxes.length) return {ok:false, why:'数字が見つからない', B, boxes:[]};
+  const maxH=Math.max(...boxes.map(b=>b.h));
+  let text='', dotAt=-1, bad=0;
+  for(const b of boxes){
+    if(b.h < maxH*0.40){                      // 背の低い塊＝小数点かマイナス
+      if(b.w < maxH*0.35){ if(text) dotAt=text.length; b.kind='dot'; }
+      else { text += '-'; b.kind='minus'; }
+      continue;
+    }
+    if(b.h < maxH*0.75){ b.kind='skip'; continue; }           // 「°C」など小さい表記は無視
+    if(b.w < maxH*0.32){ text+='1'; b.kind='1'; continue; }   // 細長い＝1
+    const d=decodeDigit(B,b);
+    if(d===null){ bad++; text+='?'; b.kind='?'; }
+    else { text+=d; b.kind=d; }
+  }
+  const digits=text.replace('-','');
+  if(bad || !digits.length || digits.includes('?')) return {ok:false, why:'判読不能 '+(text||'-'), B, boxes, text};
+  const mode=$('decimals').value;
+  let str;
+  if(mode==='1') str = text.slice(0,-1)+'.'+text.slice(-1);
+  else if(mode==='0') str = text;
+  else str = dotAt>0 ? text.slice(0,dotAt)+'.'+text.slice(dotAt) : text;
+  const v=parseFloat(str);
+  if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, B, boxes, text};
+  return {ok:true, value:v, str, B, boxes, text};
+}
+function burstRead(){
+  const n=Number($('burst').value);
+  const votes={}; let last=null;
+  for(let i=0;i<n;i++){
+    const r=readFrame(); last=r;
+    if(r.ok) votes[r.value]=(votes[r.value]||0)+1;
+  }
+  const keys=Object.keys(votes);
+  if(!keys.length) return last;
+  keys.sort((a,b)=>votes[b]-votes[a]);
+  if(n>1 && votes[keys[0]] < Math.ceil(n/2)) return {ok:false, why:'値がばらつく', B:last.B, boxes:last.boxes};
+  return {ok:true, value:Number(keys[0]), str:keys[0], B:last.B, boxes:last.boxes};
+}
+
+/* ---------- デバッグ描画 ---------- */
+function paintDebug(r){
+  if(r && r.B){
+    const {bin,w,h}=r.B;
+    dbg.width=w; dbg.height=h;
+    const im=dctx.createImageData(w,h);
+    for(let i=0;i<w*h;i++){
+      const v=bin[i]?30:200;
+      im.data[i*4]=v; im.data[i*4+1]=bin[i]?230:200; im.data[i*4+2]=bin[i]?120:200; im.data[i*4+3]=255;
+    }
+    dctx.putImageData(im,0,0);
+    dctx.strokeStyle='#e8b230'; dctx.lineWidth=1;
+    for(const b of (r.boxes||[])) dctx.strokeRect(b.x0+.5,b.y0+.5,b.w-1,b.h-1);
+  }
+  $('dbgVal').textContent = r && r.ok ? r.str+' °C' : '--';
+  $('dbgInfo').textContent = r ? (r.ok ? '読み取り成功' : r.why) : '';
+}
+
+/* ---------- 記録ループ ---------- */
+let wakeLock=null;
+async function acquireWake(){
+  try{ if('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+}
+document.addEventListener('visibilitychange', ()=>{ if(S.running && document.visibilityState==='visible') acquireWake(); });
+
+function tick(){
+  const r = burstRead();
+  paintDebug(r);
+  if(r && r.ok){
+    S.ok++; S.fails=0;
+    S.points.push([Date.now(), r.value]);
+    $('curVal').innerHTML = r.str + '<small>°C</small>';
+    $('curStamp').textContent = new Date().toLocaleTimeString('ja-JP');
+    if(S.points.length - S.flushed >= FLUSH_EVERY) flush();
+    redraw();
+  }else{
+    S.ng++; S.fails++;
+    if(S.fails===5) showAlert('5回続けて読み取れません。枠の位置、ピント、照明を確認してください。');
+  }
+  $('cntOk').textContent=S.ok; $('cntNg').textContent=S.ng;
+}
+function start(){
+  S.running=true; S.fails=0;
+  $('btnStart').textContent='記録を停止'; $('btnStart').classList.remove('primary'); $('btnStart').classList.add('stop','rec');
+  acquireWake(); saveMeta();
+  tick();
+  S.timer=setInterval(tick, Number($('interval').value)*1000);
+}
+function stop(){
+  S.running=false; clearInterval(S.timer); S.timer=null;
+  $('btnStart').textContent='記録を開始'; $('btnStart').classList.add('primary'); $('btnStart').classList.remove('stop','rec');
+  if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
+  flush();
+}
+$('btnStart').onclick = ()=> S.running ? stop() : start();
+$('btnTest').onclick = ()=> paintDebug(burstRead());
+$('btnFit').onclick = ()=>{
+  const src=grabROI(); if(!src) return;
+  const B=binarize(src), boxes=segmentDigits(B);
+  if(boxes.length<2){ showAlert('自動調整できません。数字がだいたい入るように手で枠を合わせてから、もう一度押してください。'); return; }
+  const x0=Math.min(...boxes.map(b=>b.x0)), x1=Math.max(...boxes.map(b=>b.x1));
+  const y0=Math.min(...boxes.map(b=>b.y0)), y1=Math.max(...boxes.map(b=>b.y1));
+  const mx=(x1-x0)*0.04, my=(y1-y0)*0.10;   // わずかに余白を残す
+  const nx=(x0-mx)/B.w, ny=(y0-my)/B.h, nw=(x1-x0+2*mx)/B.w, nh=(y1-y0+2*my)/B.h;
+  if(nw<0.2 || nh<0.2){ showAlert('枠が小さくなりすぎました。手で合わせ直してください。'); return; }
+  const r={...S.roi};
+  S.roi={ x:r.x+nx*r.w, y:r.y+ny*r.h, w:nw*r.w, h:nh*r.h };
+  drawOverlay(); saveMeta(); paintDebug(burstRead());
+};
+
+/* ---------- 保存 ---------- */
+async function saveMeta(){
+  try{ await window.storage.set('tmeta', JSON.stringify({roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+}
+async function flush(){
+  try{
+    const from=Math.floor(S.flushed/CHUNK), to=Math.floor(Math.max(0,S.points.length-1)/CHUNK);
+    for(let c=from;c<=to;c++){
+      const slice=S.points.slice(c*CHUNK,(c+1)*CHUNK);
+      if(slice.length) await window.storage.set('tlog:'+String(c).padStart(5,'0'), JSON.stringify(slice), false);
+    }
+    S.flushed=S.points.length;
+  }catch(e){ showAlert('保存に失敗しました。CSVを手動で書き出してください。'); }
+}
+async function load(){
+  try{
+    const m=await window.storage.get('tmeta', false);
+    if(m){ const o=JSON.parse(m.value);
+      if(o.roi) S.roi=o.roi;
+      if(o.interval)$('interval').value=o.interval;
+      if(o.thOff)$('thOff').value=o.thOff;
+      if(o.segTh)$('segTh').value=o.segTh;
+      if(o.decimals)$('decimals').value=o.decimals;
+      if(o.burst)$('burst').value=o.burst;
+      syncLabels();
+    }
+  }catch(e){}
+  try{
+    const res=await window.storage.list('tlog:', false);
+    const keys=(res && res.keys ? res.keys : []).slice().sort();
+    for(const k of keys){
+      try{ const r=await window.storage.get(k,false); if(r) S.points.push(...JSON.parse(r.value)); }catch(e){}
+    }
+    S.points.sort((a,b)=>a[0]-b[0]);
+    S.flushed=S.points.length; S.ok=S.points.length;
+    $('cntOk').textContent=S.ok;
+    if(S.points.length){
+      const last=S.points[S.points.length-1];
+      $('curVal').innerHTML=last[1].toFixed(1)+'<small>°C</small>';
+      $('curStamp').textContent=new Date(last[0]).toLocaleString('ja-JP')+' 復元';
+    }
+    redraw();
+  }catch(e){ redraw(); }
+}
+
+/* ---------- グラフ ---------- */
+const chart=$('chart'), cctx=chart.getContext('2d');
+function redraw(){
+  const dpr=window.devicePixelRatio||1;
+  const W=chart.clientWidth, H=170;
+  chart.width=W*dpr; chart.height=H*dpr; chart.style.height=H+'px';
+  cctx.setTransform(dpr,0,0,dpr,0,0);
+  cctx.clearRect(0,0,W,H);
+  const P=S.points;
+  $('stN').textContent=P.length;
+  if(P.length<1){ cctx.fillStyle='#7e8d86'; cctx.font='12px sans-serif'; cctx.fillText('記録を開始するとここに折れ線が出ます',10,H/2); 
+    $('stMin').textContent=$('stMax').textContent=$('stAvg').textContent='-'; return; }
+  const vs=P.map(p=>p[1]);
+  const mn=Math.min(...vs), mx=Math.max(...vs), av=vs.reduce((a,b)=>a+b,0)/vs.length;
+  $('stMin').textContent=mn.toFixed(1); $('stMax').textContent=mx.toFixed(1); $('stAvg').textContent=av.toFixed(2);
+  const pad=6, lo=mn-((mx-mn)||1)*0.15, hi=mx+((mx-mn)||1)*0.15;
+  const t0=P[0][0], t1=P[P.length-1][0]||t0+1;
+  const X=t=>28+(W-28-pad)*((t-t0)/((t1-t0)||1));
+  const Y=v=>H-18-(H-18-pad)*((v-lo)/((hi-lo)||1));
+  cctx.strokeStyle='#2b3733'; cctx.lineWidth=1; cctx.fillStyle='#7e8d86'; cctx.font='9px monospace';
+  for(let i=0;i<=3;i++){
+    const v=lo+(hi-lo)*i/3, y=Y(v);
+    cctx.beginPath(); cctx.moveTo(28,y); cctx.lineTo(W-pad,y); cctx.stroke();
+    cctx.fillText(v.toFixed(1), 2, y+3);
+  }
+  const step=Math.max(1,Math.ceil(P.length/600));
+  cctx.strokeStyle='#33c76e'; cctx.lineWidth=1.5; cctx.beginPath();
+  for(let i=0;i<P.length;i+=step){ const x=X(P[i][0]), y=Y(P[i][1]); i?cctx.lineTo(x,y):cctx.moveTo(x,y); }
+  cctx.stroke();
+  cctx.fillStyle='#7e8d86';
+  cctx.fillText(new Date(t0).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}),28,H-5);
+  cctx.fillText(new Date(t1).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}),W-46,H-5);
+}
+window.addEventListener('resize', redraw);
+
+/* ---------- CSV ---------- */
+function csv(){
+  let s='timestamp,temp_c\n';
+  for(const [t,v] of S.points) s += new Date(t).toISOString() + ',' + v + '\n';
+  return s;
+}
+$('btnCsv').onclick=()=>{
+  const blob=new Blob([csv()],{type:'text/csv'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='temp_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+};
+$('btnCopy').onclick=()=>{ const t=$('csvOut'); t.value=csv(); t.style.display='block'; t.select(); };
+$('btnClear').onclick=async ()=>{
+  if(!confirm('記録した全データを消します。よろしいですか？')) return;
+  try{ const res=await window.storage.list('tlog:',false);
+    for(const k of (res&&res.keys?res.keys:[])) await window.storage.delete(k,false);
+  }catch(e){}
+  S.points=[]; S.flushed=0; S.ok=0; S.ng=0;
+  $('cntOk').textContent='0'; $('cntNg').textContent='0'; $('csvOut').style.display='none';
+  redraw();
+};
+
+/* ---------- 設定UI ---------- */
+function syncLabels(){ $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; }
+for(const id of ['thOff','segTh']) $(id).addEventListener('input', ()=>{ syncLabels(); });
+for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventListener('change', ()=>{
+  saveMeta();
+  if(S.running){ clearInterval(S.timer); S.timer=setInterval(tick, Number($('interval').value)*1000); }
+});
+syncLabels();
+$('btnCam').onclick = initCamera;
+load();
+initCamera();
+</script>
+</body>
+</html>
