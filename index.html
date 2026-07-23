@@ -57,7 +57,7 @@
   select{background:#20302a;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font-size:13px}
 
   #debug{display:flex;gap:10px;align-items:center;margin-top:8px}
-  #dbgCanvas{background:#000;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;width:190px;height:auto}
+  #dbgCanvas,#rawCanvas{background:#000;border:1px solid var(--line);border-radius:4px;image-rendering:pixelated;width:190px;height:auto;display:block;margin-bottom:6px}
   #dbgText{font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6}
   #dbgText b{color:var(--green-hi);font-size:15px}
 
@@ -106,9 +106,16 @@
   <div class="row">
     <button id="btnCam">カメラを開始</button>
   </div>
-  <div class="note">枠を数字「30.1」だけにぴったり合わせます（°Cは入れない）。枠の中をドラッグで移動、右下の角をドラッグでサイズ変更。</div>
+  <div class="note">枠を数字「30.1」だけにぴったり合わせます（°Cは入れない）。枠の中をドラッグで移動、右下の角でサイズ変更。細かい調整は下のスライダーで。</div>
+  <label class="ctl"><span>左位置</span><input type="range" id="roiX" min="0" max="1000" value="250"><output id="roiXV">25.0%</output></label>
+  <label class="ctl"><span>上位置</span><input type="range" id="roiY" min="0" max="1000" value="400"><output id="roiYV">40.0%</output></label>
+  <label class="ctl"><span>幅</span><input type="range" id="roiW" min="20" max="1000" value="500"><output id="roiWV">50.0%</output></label>
+  <label class="ctl"><span>高さ</span><input type="range" id="roiH" min="20" max="1000" value="180"><output id="roiHV">18.0%</output></label>
   <div id="debug">
-    <canvas id="dbgCanvas" width="120" height="60"></canvas>
+    <div>
+      <canvas id="rawCanvas" width="120" height="60"></canvas>
+      <canvas id="dbgCanvas" width="120" height="60"></canvas>
+    </div>
     <div id="dbgText">読み取り結果<br><b id="dbgVal">--</b><br><span id="dbgInfo">まだ実行していません</span></div>
   </div>
 </div>
@@ -251,7 +258,31 @@ overlay.addEventListener('pointermove', e=>{
   }
   drawOverlay();
 });
-overlay.addEventListener('pointerup', ()=>{ if(drag){ drag=null; saveMeta(); } });
+overlay.addEventListener('pointerup', ()=>{ if(drag){ drag=null; roiToSliders(); saveMeta(); } });
+
+/* 枠の数値調整 */
+function roiToSliders(){
+  $('roiX').value = Math.round(S.roi.x*1000); $('roiY').value = Math.round(S.roi.y*1000);
+  $('roiW').value = Math.round(S.roi.w*1000); $('roiH').value = Math.round(S.roi.h*1000);
+  roiLabels();
+}
+function roiLabels(){
+  $('roiXV').textContent=(S.roi.x*100).toFixed(1)+'%'; $('roiYV').textContent=(S.roi.y*100).toFixed(1)+'%';
+  $('roiWV').textContent=(S.roi.w*100).toFixed(1)+'%'; $('roiHV').textContent=(S.roi.h*100).toFixed(1)+'%';
+}
+let previewAt=0;
+function slidersToRoi(){
+  let x=$('roiX').value/1000, y=$('roiY').value/1000, w=$('roiW').value/1000, h=$('roiH').value/1000;
+  w=Math.min(w, 1-x); h=Math.min(h, 1-y);
+  S.roi={x,y,w,h};
+  drawOverlay(); roiLabels();
+  const now=Date.now();
+  if(now-previewAt>120){ previewAt=now; try{ paintDebug(readFrame()); }catch(e){} }
+}
+for(const id of ['roiX','roiY','roiW','roiH']){
+  $(id).addEventListener('input', slidersToRoi);
+  $(id).addEventListener('change', saveMeta);
+}
 
 /* ---------- 画像取得と二値化 ---------- */
 function grabROI(){
@@ -259,15 +290,18 @@ function grabROI(){
   if(!vw) return null;
   const sx=Math.round(S.roi.x*vw), sy=Math.round(S.roi.y*vh);
   const sw=Math.max(8,Math.round(S.roi.w*vw)), sh=Math.max(8,Math.round(S.roi.h*vh));
-  const tw=180, th=Math.max(8, Math.round(sh*tw/sw));
+  // 高さを基準に拡大する。横長の枠でも数字の解像度が落ちない
+  let th=90, tw=Math.max(8, Math.round(sw*th/sh));
+  if(tw>640){ tw=640; th=Math.max(8, Math.round(sh*640/sw)); }
   work.width=tw; work.height=th;
   wctx.drawImage(video, sx,sy,sw,sh, 0,0,tw,th);
-  const img = wctx.getImageData(0,0,tw,th).data;
+  const imgData = wctx.getImageData(0,0,tw,th);
+  const img = imgData.data;
   const gray = new Uint8Array(tw*th);
   for(let i=0;i<tw*th;i++){
     gray[i] = (img[i*4]*0.299 + img[i*4+1]*0.587 + img[i*4+2]*0.114)|0;
   }
-  return {gray, w:tw, h:th};
+  return {gray, w:tw, h:th, raw:imgData};
 }
 function otsu(gray){
   const hist=new Array(256).fill(0);
@@ -289,7 +323,7 @@ function binarize(src){
   const th = Math.max(1, Math.min(254, otsu(src.gray) + Number($('thOff').value)));
   const bin = new Uint8Array(src.w*src.h);
   for(let i=0;i<bin.length;i++) bin[i] = src.gray[i] < th ? 1 : 0;  // 黒い画素=インク
-  return {bin, w:src.w, h:src.h, th};
+  return {bin, w:src.w, h:src.h, th, raw:src.raw};
 }
 
 /* ---------- 数字の切り出し ---------- */
@@ -304,22 +338,25 @@ function segmentDigits(B){
     else if(st>=0){ groups.push([st,x-1]); st=-1; }
   }
   if(st>=0) groups.push([st,w-1]);
-  // 近すぎる塊は結合
+  // 近すぎる塊は結合（間隔は数字の高さを基準にする）
+  const gap = Math.max(1, Math.round(h*0.05));
   const merged=[];
   for(const g of groups){
-    if(merged.length && g[0]-merged[merged.length-1][1] <= Math.round(w*0.015)) merged[merged.length-1][1]=g[1];
+    if(merged.length && g[0]-merged[merged.length-1][1] <= gap) merged[merged.length-1][1]=g[1];
     else merged.push([...g]);
   }
   // 各塊の上下範囲
   const boxes=[];
   for(const [x0,x1] of merged){
-    let y0=-1,y1=-1;
+    let y0=-1,y1=-1,ink=0;
     for(let y=0;y<h;y++){
       let c=0; for(let x=x0;x<=x1;x++) if(bin[y*w+x]) c++;
+      ink+=c;
       if(c >= Math.max(1, Math.round((x1-x0+1)*0.08))){ if(y0<0) y0=y; y1=y; }
     }
     if(y0<0) continue;
-    boxes.push({x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1});
+    if(ink < h*0.6) continue;            // ごま塩ノイズを捨てる
+    boxes.push({x0,x1,y0,y1,w:x1-x0+1,h:y1-y0+1,ink});
   }
   return boxes;
 }
@@ -360,7 +397,10 @@ function readFrame(){
       continue;
     }
     if(b.h < maxH*0.75){ b.kind='skip'; continue; }           // 「°C」など小さい表記は無視
-    if(b.w < maxH*0.32){ text+='1'; b.kind='1'; continue; }   // 細長い＝1
+    if(b.w < maxH*0.32){                                       // 細長い＝1、ただし端に接していれば枠線
+      if(b.x0<=1 || b.x1>=B.w-2){ b.kind='枠線'; continue; }
+      text+='1'; b.kind='1'; continue;
+    }
     const d=decodeDigit(B,b);
     if(d===null){ bad++; text+='?'; b.kind='?'; }
     else { text+=d; b.kind=d; }
@@ -391,9 +431,11 @@ function burstRead(){
 }
 
 /* ---------- デバッグ描画 ---------- */
+const raw=$('rawCanvas'), rctx=raw.getContext('2d');
 function paintDebug(r){
   if(r && r.B){
     const {bin,w,h}=r.B;
+    if(r.B.raw){ raw.width=w; raw.height=h; rctx.putImageData(r.B.raw,0,0); }
     dbg.width=w; dbg.height=h;
     const im=dctx.createImageData(w,h);
     for(let i=0;i<w*h;i++){
@@ -405,7 +447,8 @@ function paintDebug(r){
     for(const b of (r.boxes||[])) dctx.strokeRect(b.x0+.5,b.y0+.5,b.w-1,b.h-1);
   }
   $('dbgVal').textContent = r && r.ok ? r.str+' °C' : '--';
-  $('dbgInfo').textContent = r ? (r.ok ? '読み取り成功' : r.why) : '';
+  const kinds = (r && r.boxes ? r.boxes : []).map(b=>b.kind||'?').join(' ');
+  $('dbgInfo').textContent = (r ? (r.ok ? '読み取り成功' : r.why) : '') + (kinds ? ' / 検出: '+kinds : '');
 }
 
 /* ---------- 記録ループ ---------- */
@@ -457,7 +500,7 @@ $('btnFit').onclick = ()=>{
   if(nw<0.2 || nh<0.2){ showAlert('枠が小さくなりすぎました。手で合わせ直してください。'); return; }
   const r={...S.roi};
   S.roi={ x:r.x+nx*r.w, y:r.y+ny*r.h, w:nw*r.w, h:nh*r.h };
-  drawOverlay(); saveMeta(); paintDebug(burstRead());
+  drawOverlay(); roiToSliders(); saveMeta(); paintDebug(burstRead());
 };
 
 /* ---------- 保存 ---------- */
@@ -484,7 +527,7 @@ async function load(){
       if(o.segTh)$('segTh').value=o.segTh;
       if(o.decimals)$('decimals').value=o.decimals;
       if(o.burst)$('burst').value=o.burst;
-      syncLabels();
+      syncLabels(); roiToSliders();
     }
   }catch(e){}
   try{
@@ -572,6 +615,7 @@ for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventL
   if(S.running){ clearInterval(S.timer); S.timer=setInterval(tick, Number($('interval').value)*1000); }
 });
 syncLabels();
+roiToSliders();
 $('btnCam').onclick = initCamera;
 load();
 initCamera();
