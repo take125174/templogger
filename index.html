@@ -363,6 +363,48 @@ function detectWindow(){
   const holes=new Uint8Array(N);
   for(let i=0;i<N;i++) if(!isBody[i] && !out[i]) holes[i]=1;
   const Hc=labelMask(holes,W,H);
+
+  // 窓の中に「数字らしい塊」がいくつあるか数える。液晶にはあるが、ソーラーには無い
+  function digitScore(c){
+    const bw=c.w, bh=c.h;
+    if(bw<12||bh<8) return 0;
+    const pix=[]; 
+    for(let y=c.y0;y<=c.y1;y++) for(let x=c.x0;x<=c.x1;x++){
+      const i=y*W+x;
+      pix.push(Hc.lab[i]===c.id ? lum[i] : -1);
+    }
+    const vals=pix.filter(v=>v>=0);
+    if(vals.length<40) return 0;
+    const hist=new Array(256).fill(0);
+    for(const v of vals) hist[v]++;
+    let sum=0; for(let i=0;i<256;i++) sum+=i*hist[i];
+    let sumB=0,wB=0,bestV=0,th=128;
+    for(let t=0;t<256;t++){
+      wB+=hist[t]; if(!wB) continue;
+      const wF=vals.length-wB; if(!wF) break;
+      sumB+=t*hist[t];
+      const mB=sumB/wB, mF=(sum-sumB)/wF;
+      const v=wB*wF*(mB-mF)*(mB-mF);
+      if(v>bestV){ bestV=v; th=t; }
+    }
+    // 窓の中の暗い画素＝数字。塊の大きさが数字らしいものを数える
+    const m=new Uint8Array(bw*bh);
+    for(let y=0;y<bh;y++) for(let x=0;x<bw;x++){
+      const v=pix[y*bw+x];
+      m[y*bw+x] = (v>=0 && v<=th) ? 1 : 0;
+    }
+    const {comps}=labelMask(m,bw,bh);
+    let n=0;
+    for(const s of comps){
+      if(s.x0<=0||s.y0<=0||s.x1>=bw-1||s.y1>=bh-1) continue;   // 窓の縁は除く
+      if(s.h < bh*0.25 || s.h > bh*0.95) continue;
+      if(s.w > bh*1.2) continue;
+      if(s.area < 6) continue;
+      n++;
+    }
+    return n;
+  }
+
   let best=null;
   for(const c of Hc.comps){
     if(c.area < body.area*0.02) continue;
@@ -373,9 +415,21 @@ function detectWindow(){
       const i=y*W+x; if(Hc.lab[i]===c.id){ s+=lum[i]; n2++; }
     }
     const bright=n2?s/n2:0;
-    if(!best || bright>best.bright) best={c, bright};   // 明るいほうが液晶、暗いほうがソーラー
+    const digits=digitScore(c);
+    // 直前に選んだ窓と重なっていれば加点する（フレームごとに入れ替わるのを防ぐ）
+    let stick=0;
+    if(found){
+      const fx0=found.x*W, fy0=found.y*H, fx1=(found.x+found.w)*W, fy1=(found.y+found.h)*H;
+      const ov=Math.max(0,Math.min(c.x1,fx1)-Math.max(c.x0,fx0))*Math.max(0,Math.min(c.y1,fy1)-Math.max(c.y0,fy0));
+      const uni=c.area+(fx1-fx0)*(fy1-fy0)-ov;
+      if(uni>0 && ov/uni>0.4) stick=1.5;
+    }
+    // 数字の数を最優先、次に「前回と同じ窓か」、明るさは最後の判断材料
+    const score = digits*10 + stick + bright/255;
+    if(!best || score>best.score) best={c, score, digits};
   }
   if(!best) return null;
+  if(best.digits===0 && found) return null;   // どの窓にも数字が無いなら前回の窓を保つ
   const c=best.c;
   return { x:c.x0/W, y:c.y0/H, w:(c.x1-c.x0+1)/W, h:(c.y1-c.y0+1)/H };
 }
@@ -388,6 +442,8 @@ function currentRect(){
   }
   return found || S.roi;
 }
+// 手動で追従をやり直したいとき用
+function resetTracking(){ found=null; foundAt=0; }
 
 function grabROI(){
   const vw = video.videoWidth, vh = video.videoHeight;
