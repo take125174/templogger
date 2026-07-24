@@ -136,6 +136,8 @@
   <div class="eyebrow">設定</div>
   <label class="ctl"><span>記録間隔</span>
     <select id="interval">
+      <option value="1">1秒</option>
+      <option value="2">2秒</option>
       <option value="5">5秒</option>
       <option value="10" selected>10秒</option>
       <option value="30">30秒</option>
@@ -488,8 +490,12 @@ function otsu(gray){
 function binarize(src){
   const th = Math.max(1, Math.min(254, otsu(src.gray) + Number($('thOff').value)));
   const bin = new Uint8Array(src.w*src.h);
-  for(let i=0;i<bin.length;i++) bin[i] = src.gray[i] < th ? 1 : 0;  // 黒い画素=インク
-  return {bin, w:src.w, h:src.h, th, raw:src.raw};
+  let dark=0;
+  for(let i=0;i<bin.length;i++){ if(src.gray[i] <= th){ bin[i]=1; dark++; } }
+  // 数字は画面の少数派。半分を超えたら明暗が逆なので反転する
+  const inverted = dark > bin.length*0.5;
+  if(inverted) for(let i=0;i<bin.length;i++) bin[i] = bin[i] ? 0 : 1;
+  return {bin, w:src.w, h:src.h, th, inverted, raw:src.raw};
 }
 
 /* ---------- 数字の切り出し ---------- */
@@ -518,10 +524,23 @@ function blobs(bin,w,h){
 // 液晶の縁や影（画像の端に接する塊）を消す
 function removeBorderBlobs(B){
   const {bin,w,h}=B;
+  // まず、端から続く「ほぼ全部インク」の行・列を削る。縁の暗い帯はこれで落ちる
+  const rowInk=y=>{ let c=0; for(let x=0;x<w;x++) if(bin[y*w+x]) c++; return c/w; };
+  const colInk=x=>{ let c=0; for(let y=0;y<h;y++) if(bin[y*w+x]) c++; return c/h; };
+  const maxTrimY=Math.floor(h*0.25), maxTrimX=Math.floor(w*0.25);
+  for(let k=0,y=0;   k<maxTrimY && rowInk(y)>0.85; k++,y++)   for(let x=0;x<w;x++) bin[y*w+x]=0;
+  for(let k=0,y=h-1; k<maxTrimY && rowInk(y)>0.85; k++,y--)   for(let x=0;x<w;x++) bin[y*w+x]=0;
+  for(let k=0,x=0;   k<maxTrimX && colInk(x)>0.85; k++,x++)   for(let y=0;y<h;y++) bin[y*w+x]=0;
+  for(let k=0,x=w-1; k<maxTrimX && colInk(x)>0.85; k++,x--)   for(let y=0;y<h;y++) bin[y*w+x]=0;
+
+  let total=0; for(let i=0;i<w*h;i++) if(bin[i]) total++;
+  if(!total) return;
   const {lab,comps}=blobs(bin,w,h);
-  const kill=new Set();
-  for(const c of comps) if(c.x0<=0||c.y0<=0||c.x1>=w-1||c.y1>=h-1) kill.add(c.id);
-  if(kill.size) for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0;
+  const kill=new Set(); let lost=0;
+  for(const c of comps) if(c.x0<=0||c.y0<=0||c.x1>=w-1||c.y1>=h-1){ kill.add(c.id); lost+=c.area; }
+  // 数字が縁とつながっている場合、消すと全部無くなる。そのときは消さない
+  if(!kill.size || lost > total*0.75) return;
+  for(let i=0;i<w*h;i++) if(lab[i]&&kill.has(lab[i])) bin[i]=0;
 }
 
 // この液晶の数字は斜体。傾きを推定して打ち消す
@@ -682,23 +701,34 @@ function calibrate(expected){
   if(!src) return {ok:false, why:'カメラが動いていません'};
   const B=binarize(src);
   const boxes=segmentDigits(B);
-  if(!boxes.length) return {ok:false, why:'数字が見つかりません'};
+  if(!boxes.length) return {ok:false, why:'数字が見つかりません。枠の中に数字が入っているか、下の二値化画像に数字が出ているか確認してください'};
   const maxH=Math.max(...boxes.map(b=>b.h));
   const digitBoxes=boxes.filter(b=>b.h>=maxH*0.75);
   const chars=expected.replace(/[^0-9]/g,'');
   if(!chars.length) return {ok:false, why:'数字を入力してください'};
-  if(digitBoxes.length!==chars.length)
-    return {ok:false, why:'桁数が合いません（画面では'+digitBoxes.length+'桁、入力は'+chars.length+'桁）'};
-  // 桁の幅は、細い「1」を除いた中央値を使う
-  const wide=digitBoxes.filter(b=>b.w>=maxH*0.32).map(b=>b.w);
-  const cellW=wide.length? wide.sort((a,b)=>a-b)[Math.floor(wide.length/2)] : digitBoxes[0].w;
+
+  let cells;
   const y0=Math.min(...digitBoxes.map(b=>b.y0)), y1=Math.max(...digitBoxes.map(b=>b.y1));
-  const cells=digitBoxes.map(b=>{
-    // 「1」は枠の右端に寄るので、右端を基準にセルを組み立てる
-    const x1 = b.w<cellW*0.6 ? b.x1+cellW*0.06 : b.x1;
-    const x0 = b.w<cellW*0.6 ? x1-cellW : b.x0;
-    return { x0:x0/B.w, y0:y0/B.h, w:(x1-x0)/B.w, h:(y1-y0)/B.h };
-  });
+  if(digitBoxes.length===chars.length){
+    // 桁がきれいに分かれた場合は、その位置をそのまま使う
+    const wide=digitBoxes.filter(b=>b.w>=maxH*0.32).map(b=>b.w).sort((a,b)=>a-b);
+    const cellW=wide.length? wide[Math.floor(wide.length/2)] : digitBoxes[0].w;
+    cells=digitBoxes.map(b=>{
+      // 「1」は枠の右端に寄るので、右端を基準にセルを組み立てる
+      const x1 = b.w<cellW*0.6 ? b.x1+cellW*0.06 : b.x1;
+      const x0 = b.w<cellW*0.6 ? x1-cellW : b.x0;
+      return { x0:x0/B.w, y0:y0/B.h, w:(x1-x0)/B.w, h:(y1-y0)/B.h };
+    });
+  } else {
+    // 分かれ方が不完全でも、7セグは等間隔なので全体を桁数で等分する
+    const gx0=Math.min(...digitBoxes.map(b=>b.x0)), gx1=Math.max(...digitBoxes.map(b=>b.x1));
+    const span=gx1-gx0+1;
+    if(span < chars.length*4) return {ok:false, why:'数字の範囲が狭すぎます'};
+    const cw=span/chars.length;
+    cells=[];
+    for(let i=0;i<chars.length;i++)
+      cells.push({ x0:(gx0+i*cw)/B.w, y0:y0/B.h, w:cw/B.w, h:(y1-y0)/B.h });
+  }
   // 教えてもらった値から、点灯・消灯それぞれの明るさを学習する
   const on=[], off=[];
   cells.forEach((c,i)=>{
@@ -850,24 +880,31 @@ async function acquireWake(){
 }
 document.addEventListener('visibilitychange', ()=>{ if(S.running && document.visibilityState==='visible') acquireWake(); });
 
+let ticking=false, lastDraw=0;
 function tick(){
-  const r = burstRead();
-  paintDebug(r);
-  if(r && r.ok){
-    // 直前と違う値なら、次のフレームで確認できるまで記録しない
-    if(S.pending!==r.value && S.last!==r.value){ S.pending=r.value; paintDebug(r); return; }
-    S.pending=null; S.last=r.value;
-    S.ok++; S.fails=0;
-    S.points.push([Date.now(), r.value]);
-    $('curVal').innerHTML = r.str + '<small>°C</small>';
-    $('curStamp').textContent = new Date().toLocaleTimeString('ja-JP');
-    if(S.points.length - S.flushed >= FLUSH_EVERY) flush();
-    redraw();
-  }else{
-    S.ng++; S.fails++;
-    if(S.fails===5) showAlert('5回続けて読み取れません。枠の位置、ピント、照明を確認してください。');
-  }
-  $('cntOk').textContent=S.ok; $('cntNg').textContent=S.ng;
+  if(ticking) return;            // 前回の処理が終わるまで次を始めない
+  ticking=true;
+  try{
+    const r = burstRead();
+    paintDebug(r);
+    if(r && r.ok){
+      // 直前と違う値なら、次のフレームで確認できるまで記録しない
+      if(S.pending!==r.value && S.last!==r.value){ S.pending=r.value; return; }
+      S.pending=null; S.last=r.value;
+      S.ok++; S.fails=0;
+      S.points.push([Date.now(), r.value]);
+      $('curVal').innerHTML = r.str + '<small>°C</small>';
+      $('curStamp').textContent = new Date().toLocaleTimeString('ja-JP');
+      if(S.points.length - S.flushed >= FLUSH_EVERY) flush();
+      // 1秒間隔ではグラフの再描画を間引く
+      const now=Date.now();
+      if(now-lastDraw > 1500){ lastDraw=now; redraw(); }
+    }else{
+      S.ng++; S.fails++;
+      if(S.fails===5) showAlert('5回続けて読み取れません。枠の位置、ピント、照明を確認してください。');
+    }
+    $('cntOk').textContent=S.ok; $('cntNg').textContent=S.ng;
+  } finally { ticking=false; }
 }
 function start(){
   S.running=true; S.fails=0;
