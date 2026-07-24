@@ -95,6 +95,12 @@
     <button id="btnTest">1回テスト</button>
     <button id="btnFit">枠を自動調整</button>
   </div>
+  <div class="row">
+    <input id="calVal" placeholder="今の表示（例 30.1）" inputmode="decimal"
+      style="flex:2;min-width:130px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:var(--mono);font-size:14px">
+    <button id="btnCal">この値で校正</button>
+  </div>
+  <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
 <div class="card">
@@ -178,12 +184,13 @@
 <script>
 /* ---------- 状態 ---------- */
 const S = {
+  cal: null,            // 校正データ（桁のセル位置と明るさの基準）
   roi: {x:0.25, y:0.40, w:0.50, h:0.18},   // 正規化座標
   points: [],           // [ms, value]
   flushed: 0,
   running: false,
   timer: null,
-  ok: 0, ng: 0,
+  ok: 0, ng: 0, pending:null, last:null,
   fails: 0
 };
 const CHUNK = 360, FLUSH_EVERY = 30;
@@ -577,7 +584,133 @@ function decodeDigit(B, box){
   if(margin < need) return {digit:null, margin};
   return {digit:res[0].digit, margin};
 }
+/* ---------- 校正モード ----------
+   一度だけ正解を教えてもらい、桁の枠と明るさの基準を覚える。
+   以降は「探す」のではなく「決まった位置を照合する」ので安定する。 */
+const SEGR = { a:[.20,.00,.60,.18], b:[.72,.10,.28,.36], c:[.72,.54,.28,.36], d:[.20,.82,.60,.18],
+               e:[.00,.54,.28,.36], f:[.00,.10,.28,.36], g:[.20,.41,.60,.18] };
+const SEGK = ['a','b','c','d','e','f','g'];
+const PAT = {};
+for(const bits in SEGMAP) PAT[SEGMAP[bits]] = bits;
+
+// 灰色画像から、指定枠の各セグメントの平均輝度を取る
+function segGray(src, cell){
+  const {gray,w,h}=src;
+  const out=[];
+  for(const k of SEGK){
+    const r=SEGR[k];
+    const x0=Math.max(0,Math.round(cell.x0 + r[0]*cell.w)), x1=Math.min(w-1,Math.round(cell.x0+(r[0]+r[2])*cell.w));
+    const y0=Math.max(0,Math.round(cell.y0 + r[1]*cell.h)), y1=Math.min(h-1,Math.round(cell.y0+(r[1]+r[3])*cell.h));
+    let s=0,n=0;
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ s+=gray[y*w+x]; n++; }
+    out.push(n? s/n : 0);
+  }
+  return out;
+}
+function otsuOn(vals){          // 数値の並びを2群に分ける境界
+  if(vals.length<2) return null;
+  const v=[...vals].sort((a,b)=>a-b);
+  let best=null, th=null;
+  for(let i=1;i<v.length;i++){
+    const A=v.slice(0,i), Bv=v.slice(i);
+    const ma=A.reduce((x,y)=>x+y,0)/A.length, mb=Bv.reduce((x,y)=>x+y,0)/Bv.length;
+    const sc=A.length*Bv.length*(ma-mb)*(ma-mb);
+    if(best===null||sc>best){ best=sc; th=(v[i-1]+v[i])/2; }
+  }
+  return th;
+}
+
+// 校正：今のフレームから桁の枠を求め、等間隔のセルとして記録する
+function calibrate(expected){
+  const src=grabROI();
+  if(!src) return {ok:false, why:'カメラが動いていません'};
+  const B=binarize(src);
+  const boxes=segmentDigits(B);
+  if(!boxes.length) return {ok:false, why:'数字が見つかりません'};
+  const maxH=Math.max(...boxes.map(b=>b.h));
+  const digitBoxes=boxes.filter(b=>b.h>=maxH*0.75);
+  const chars=expected.replace(/[^0-9]/g,'');
+  if(!chars.length) return {ok:false, why:'数字を入力してください'};
+  if(digitBoxes.length!==chars.length)
+    return {ok:false, why:'桁数が合いません（画面では'+digitBoxes.length+'桁、入力は'+chars.length+'桁）'};
+  // 桁の幅は、細い「1」を除いた中央値を使う
+  const wide=digitBoxes.filter(b=>b.w>=maxH*0.32).map(b=>b.w);
+  const cellW=wide.length? wide.sort((a,b)=>a-b)[Math.floor(wide.length/2)] : digitBoxes[0].w;
+  const y0=Math.min(...digitBoxes.map(b=>b.y0)), y1=Math.max(...digitBoxes.map(b=>b.y1));
+  const cells=digitBoxes.map(b=>{
+    // 「1」は枠の右端に寄るので、右端を基準にセルを組み立てる
+    const x1 = b.w<cellW*0.6 ? b.x1+cellW*0.06 : b.x1;
+    const x0 = b.w<cellW*0.6 ? x1-cellW : b.x0;
+    return { x0:x0/B.w, y0:y0/B.h, w:(x1-x0)/B.w, h:(y1-y0)/B.h };
+  });
+  // 教えてもらった値から、点灯・消灯それぞれの明るさを学習する
+  const on=[], off=[];
+  cells.forEach((c,i)=>{
+    const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
+    const g=segGray(src,cell), p=PAT[chars[i]];
+    if(!p) return;
+    for(let k=0;k<7;k++) (p[k]==='1'?on:off).push(g[k]);
+  });
+  if(!on.length || !off.length) return {ok:false, why:'明るさを学習できません'};
+  const mOn=on.reduce((a,b)=>a+b,0)/on.length, mOff=off.reduce((a,b)=>a+b,0)/off.length;
+  if(Math.abs(mOn-mOff) < 8) return {ok:false, why:'明暗の差が小さすぎます。照明を見直してください'};
+  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:expected.indexOf('.')>=0 ? expected.replace(/[^0-9.]/g,'').indexOf('.') : -1 };
+  saveMeta();
+  return {ok:true, n:chars.length};
+}
+
+// 校正済みの読み取り。決まったセルを照合するだけなので速く安定する
+function readCalibrated(){
+  const src=grabROI();
+  if(!src) return {ok:false, why:'カメラ待ち'};
+  const cal=S.cal;
+  const all=[], per=[];
+  for(const c of cal.cells){
+    const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
+    const g=segGray(src,cell);
+    per.push({cell,g}); all.push(...g);
+  }
+  // フレームごとに、その場の明るさで点灯・消灯の境界を引き直す
+  const mid=(cal.mOn+cal.mOff)/2, gap=Math.abs(cal.mOn-cal.mOff);
+  const spread=Math.max(...all)-Math.min(...all);
+  let th=otsuOn(all);
+  if(th===null || spread < gap*0.5) th=mid;      // 全桁が同じ状態なら学習した基準を使う
+  else {
+    const lo=Math.min(cal.mOn,cal.mOff), hi=Math.max(cal.mOn,cal.mOff);
+    th=Math.min(Math.max(th, lo+gap*0.15), hi-gap*0.15);
+  }
+  const dark=cal.dark;
+  let text='', worst=1e9;
+  const boxes=[];
+  per.forEach(({cell,g})=>{
+    let bits='';
+    for(let k=0;k<7;k++){
+      const on = dark ? (g[k]<th) : (g[k]>th);
+      bits += on?'1':'0';
+      worst=Math.min(worst, Math.abs(g[k]-th));
+    }
+    const d=SEGMAP[bits];
+    text += d || '?';
+    boxes.push({x0:Math.round(cell.x0), y0:Math.round(cell.y0),
+                w:Math.round(cell.w), h:Math.round(cell.h), kind:d||'?'});
+  });
+  const B=binarize(src);
+  if(text.includes('?')) return {ok:false, why:'照合できない '+text, B, boxes};
+  if(worst < 4) return {ok:false, why:'明暗の差が小さい', B, boxes};
+  let str=text;
+  const mode=$('decimals').value;
+  if(cal.dec>0) str=text.slice(0,cal.dec)+'.'+text.slice(cal.dec);
+  else if(mode==='1' && text.length>1) str=text.slice(0,-1)+'.'+text.slice(-1);
+  const v=parseFloat(str);
+  if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, B, boxes};
+  return {ok:true, value:v, str, B, boxes, text};
+}
+
 function readFrame(){
+  if(S.cal) return readCalibrated();
+  return readFrameAuto();
+}
+function readFrameAuto(){
   const src=grabROI();
   if(!src) return {ok:false, why:'カメラ待ち'};
   const B=binarize(src);
@@ -646,7 +779,7 @@ function paintDebug(r){
       im.data[i*4]=v; im.data[i*4+1]=bin[i]?230:200; im.data[i*4+2]=bin[i]?120:200; im.data[i*4+3]=255;
     }
     dctx.putImageData(im,0,0);
-    dctx.strokeStyle='#e8b230'; dctx.lineWidth=1;
+    dctx.strokeStyle= S.cal ? '#33c76e' : '#e8b230'; dctx.lineWidth=1;
     for(const b of (r.boxes||[])) dctx.strokeRect(b.x0+.5,b.y0+.5,b.w-1,b.h-1);
   }
   $('dbgVal').textContent = r && r.ok ? r.str+' °C' : '--';
@@ -665,6 +798,9 @@ function tick(){
   const r = burstRead();
   paintDebug(r);
   if(r && r.ok){
+    // 直前と違う値なら、次のフレームで確認できるまで記録しない
+    if(S.pending!==r.value && S.last!==r.value){ S.pending=r.value; paintDebug(r); return; }
+    S.pending=null; S.last=r.value;
     S.ok++; S.fails=0;
     S.points.push([Date.now(), r.value]);
     $('curVal').innerHTML = r.str + '<small>°C</small>';
@@ -692,6 +828,21 @@ function stop(){
 }
 $('btnStart').onclick = ()=> S.running ? stop() : start();
 $('btnTest').onclick = ()=> paintDebug(burstRead());
+function showCal(){
+  $('calState').textContent = S.cal
+    ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
+    : '未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。';
+}
+$('btnCal').onclick = ()=>{
+  const v=$('calVal').value.trim();
+  if(!v){ showAlert('今の表示の数字を入力してください（例 30.1）'); return; }
+  S.cal=null;
+  const r=calibrate(v);
+  if(!r.ok){ showAlert('校正できません：'+r.why); showCal(); return; }
+  $('alert').style.display='none';
+  showCal();
+  paintDebug(burstRead());
+};
 $('btnFit').onclick = ()=>{
   const src=grabROI(); if(!src) return;
   const B=binarize(src), boxes=segmentDigits(B);
@@ -708,7 +859,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -724,13 +875,14 @@ async function load(){
   try{
     const m=await window.storage.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
+      if(o.cal) S.cal=o.cal;
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
       if(o.thOff)$('thOff').value=o.thOff;
       if(o.segTh)$('segTh').value=o.segTh;
       if(o.decimals)$('decimals').value=o.decimals;
       if(o.burst)$('burst').value=o.burst;
-      syncLabels(); roiToSliders();
+      syncLabels(); roiToSliders(); showCal();
     }
   }catch(e){}
   try{
@@ -819,6 +971,7 @@ for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventL
 });
 syncLabels();
 roiToSliders();
+showCal();
 $('btnCam').onclick = initCamera;
 $('mode').addEventListener('change', ()=>{ found=null; drawOverlay(); saveMeta(); });
 setInterval(()=>{ if($('mode').value==='auto' && video.videoWidth) drawOverlay(); }, 500);
