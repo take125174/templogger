@@ -1194,9 +1194,11 @@ function gsShow(msg){ $('gsState').textContent=msg; }
 
 async function gsFlush(force){
   const url=gsUrl();
-  if(!url || gsSending || !gsQueue.length) return;
+  if(!url || !gsQueue.length) return false;
+  if(force) gsSending=false;              // 手動送信は固まった状態でも割り込める
+  if(gsSending) return false;
   const everyMs = Number(($('gsEvery')||{value:10}).value)*1000;
-  if(!force && Date.now()-(gsLastOk||0) < everyMs) return;
+  if(!force && Date.now()-(gsLastOk||0) < everyMs) return false;
   gsSending=true; gsSendStart=Date.now();
   const batch=gsQueue.slice(0, 200);
   try{
@@ -1212,12 +1214,33 @@ async function gsFlush(force){
       gsQueue=gsQueue.slice(batch.length);
       gsLastOk=Date.now(); gsFails=0;
       gsShow('送信済み '+new Date().toLocaleTimeString('ja-JP')+'　待ち '+gsQueue.length+'件');
+      return true;
     } else {
       gsFails++; gsShow('送信に失敗しました（'+gsFails+'回）。待ち '+gsQueue.length+'件');
+      return false;
     }
   }catch(e){
-    gsFails++; gsShow('送信できません（'+gsFails+'回）。URLと公開設定を確認してください。待ち '+gsQueue.length+'件');
+    gsFails++;
+    gsShow('送信できません（'+gsFails+'回・'+String(e.name||e)+'）。待ち '+gsQueue.length+'件');
+    return false;
   } finally { gsSending=false; }
+}
+
+// 待ちがなくなるまで続けて送る
+let gsDraining=false;
+async function gsFlushAll(){
+  if(gsDraining){ gsShow('送信中です…'); return; }
+  gsDraining=true;
+  try{
+    let guard=0;
+    while(gsQueue.length && guard++ < 100){
+      gsShow('送信中… 残り '+gsQueue.length+'件');
+      const ok=await gsFlush(true);
+      if(!ok) break;
+      await new Promise(r=>setTimeout(r,400));   // 連続投入を少し緩める
+    }
+    if(!gsQueue.length) gsShow('送信が完了しました '+new Date().toLocaleTimeString('ja-JP'));
+  } finally { gsDraining=false; }
 }
 setInterval(()=>gsFlush(false), 2000);
 
@@ -1252,9 +1275,11 @@ $('gsTest').onclick = async ()=>{
   saveMeta();
 };
 $('gsSend').onclick = ()=>{
+  if(!gsUrl()){ gsShow('URLを入れてください'); return; }
   // 未送信ぶんが無ければ、記録済みの全データを送る
   if(!gsQueue.length) gsQueue=S.points.slice();
-  gsFlush(true);
+  if(!gsQueue.length){ gsShow('送るデータがありません'); return; }
+  gsFlushAll();
 };
 $('gsOpen').onclick = ()=>{ const u=gsUrl(); if(u) window.open(u,'_blank'); };
 $('gsReset').onclick = async ()=>{
