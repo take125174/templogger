@@ -99,6 +99,7 @@
     <input id="calVal" placeholder="今の表示（例 30.1）" inputmode="decimal"
       style="flex:2;min-width:130px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:var(--mono);font-size:14px">
     <button id="btnCal">この値で校正</button>
+    <button id="btnAuto" class="primary">自動で合わせる</button>
     <button id="btnUncal">校正を解除</button>
     <button id="btnGridReset">格子を初期値へ</button>
   </div>
@@ -775,6 +776,100 @@ function decodeDigit(B, box){
   if(margin < need) return {digit:null, margin};
   return {digit:res[0].digit, margin};
 }
+
+/* ---------- 格子の自動微調整 ----------
+   正解の値が分かっているので、「点灯すべき区画が暗く、消灯すべき区画が明るい」状態が
+   最もはっきりする格子を探す。今の設定の近くだけを探すので確実に良くなる。 */
+function gridParams(){
+  return { l:Number($('gL').value)/1000, r:Number($('gR').value)/1000,
+           t:Number($('gT').value)/1000, b:Number($('gB').value)/1000,
+           rot:Number($('gS').value)/10, wf:Number($('gW').value)/100,
+           dot:Number($('gD').value)/100 };
+}
+function setGridParams(p){
+  $('gL').value=Math.round(p.l*1000); $('gR').value=Math.round(p.r*1000);
+  $('gT').value=Math.round(p.t*1000); $('gB').value=Math.round(p.b*1000);
+  $('gS').value=Math.round(p.rot*10); $('gW').value=Math.round(p.wf*100);
+  $('gD').value=Math.round(p.dot*100);
+  gridLabels();
+}
+function cellsFromParams(p, n, dec){
+  const hasDot = dec>0 && dec<n;
+  const pitch=(p.r-p.l)/(n+(hasDot?p.dot:0));
+  const gap=pitch*p.dot, cw=pitch*p.wf, pad=(pitch-cw)/2;
+  const cells=[]; let x=p.l;
+  for(let i=0;i<n;i++){
+    if(hasDot && i===dec) x+=gap;
+    cells.push({x0:x+pad, y0:p.t, w:cw, h:p.b-p.t});
+    x+=pitch;
+  }
+  return cells;
+}
+// 格子の良さを測る。大きいほど良い
+function gridScore(src, p, chars, dec){
+  const n=chars.length;
+  const cells=cellsFromParams(p,n,dec);
+  const centre={ x:(cells[0].x0+cells[n-1].x0+cells[0].w)/2*src.w,
+                 y:(cells[0].y0+cells[0].h/2)*src.h };
+  const on=[], off=[];
+  const boxes=[];
+  for(let i=0;i<n;i++){
+    const c=cells[i];
+    const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
+    if(cell.w<5||cell.h<5) return -1e9;
+    boxes.push(cell);
+    const g=segGray(src,cell,p.rot,centre);
+    const bits=PAT[chars[i]];
+    if(!bits) return -1e9;
+    for(let k=0;k<7;k++) (bits[k]==='1'?on:off).push(g[k]);
+  }
+  if(!on.length||!off.length) return -1e9;
+  const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+  const sd=(a,m)=>Math.sqrt(a.reduce((x,y)=>x+(y-m)*(y-m),0)/a.length);
+  const mOn=mean(on), mOff=mean(off);
+  const sep=Math.abs(mOff-mOn)/(sd(on,mOn)+sd(off,mOff)+1);
+  // インクがセルの中心に来ているか。ずれた格子を弾く
+  const dark=mOn<mOff;
+  let pen=0;
+  for(const cell of boxes){
+    const x0=Math.round(cell.x0), y0=Math.round(cell.y0);
+    const cw=Math.round(cell.w), ch=Math.round(cell.h);
+    let sw=0,sx=0,sy=0;
+    for(let y=0;y<ch;y+=2) for(let x=0;x<cw;x+=2){
+      const px=x0+x, py=y0+y;
+      if(px<0||py<0||px>=src.w||py>=src.h) continue;
+      const v=src.gray[py*src.w+px];
+      const wgt = dark ? Math.max(0,mOff-v) : Math.max(0,v-mOff);
+      sw+=wgt; sx+=wgt*x; sy+=wgt*y;
+    }
+    if(sw<1e-6) return -1e9;
+    pen += Math.abs(sx/sw/cw-0.5) + Math.abs(sy/sw/ch-0.5);
+  }
+  return sep * (1 - Math.min(0.95, pen/n*2.5));
+}
+function refineGrid(src, chars, dec, start){
+  let p=Object.assign({},start);
+  let best=gridScore(src,p,chars,dec);
+  const plan=[
+    {rot:1.5,l:.02,r:.02,t:.02,b:.02,wf:.05,dot:.05},
+    {rot:0.5,l:.008,r:.008,t:.008,b:.008,wf:.02,dot:.02},
+    {rot:0.2,l:.003,r:.003,t:.003,b:.003,wf:.008,dot:.008},
+  ];
+  const lim={l:[0,.9],r:[.1,1],t:[0,.9],b:[.1,1],rot:[-20,20],wf:[.4,1],dot:[0,.6]};
+  for(const step of plan) for(let pass=0;pass<3;pass++)
+    for(const key of ['rot','l','r','t','b','wf','dot']){
+      if(key==='dot' && !(dec>0 && dec<chars.length)) continue;
+      for(const mul of [-2,-1,1,2]){
+        const q=Object.assign({},p); q[key]=p[key]+step[key]*mul;
+        if(q[key]<lim[key][0]||q[key]>lim[key][1]) continue;
+        if(q.r-q.l<0.15||q.b-q.t<0.15) continue;
+        const sc=gridScore(src,q,chars,dec);
+        if(sc>best){ best=sc; p=q; }
+      }
+    }
+  return {p,score:best};
+}
+
 /* ---------- 校正モード ----------
    一度だけ正解を教えてもらい、桁の枠と明るさの基準を覚える。
    以降は「探す」のではなく「決まった位置を照合する」ので安定する。 */
@@ -1198,6 +1293,36 @@ $('btnGridReset').onclick = ()=>{
   gridLabels(); drawOverlay(); previewGrid(); saveMeta();
 };
 $('btnUncal').onclick = ()=>{ S.cal=null; saveMeta(); showCal(); previewGrid(); };
+
+$('btnAuto').onclick = ()=>{
+  const v=$('calVal').value.trim();
+  const chars=v.replace(/[^0-9]/g,'');
+  if(!chars.length){ showAlert('先に今の表示（例 34.3）を入力してください'); return; }
+  const src=grabROI();
+  if(!src){ showAlert('カメラが動いていません'); return; }
+  const dec=v.replace(/[^0-9.]/g,'').indexOf('.');
+  const start=gridParams();
+  const before=gridScore(src,start,chars,dec);
+  const fit=refineGrid(src,chars,dec,start);
+  if(!(fit.score>before)){
+    gsSafeAlert('これ以上よくなりませんでした。格子を数字の位置にだいたい合わせてから、もう一度押してください。');
+    return;
+  }
+  setGridParams(fit.p);
+  applyGridToCal();
+  drawOverlay();
+  const r=calibrate(v);
+  if(!r.ok){ showAlert('自動調整はできましたが校正に失敗：'+r.why); showCal(); return; }
+  $('alert').style.display='none';
+  S.last=null; S.pending=null;
+  showCal();
+  const test=burstRead();
+  paintDebug(test);
+  $('calState').textContent = '自動調整しました（一致度 '+before.toFixed(2)+' → '+fit.score.toFixed(2)+'）。'
+    + (test.ok ? '読み取り成功: '+test.str+'°C' : '読み取り: '+test.why);
+};
+function gsSafeAlert(m){ showAlert(m); }
+
 $('btnCal').onclick = ()=>{
   const v=$('calVal').value.trim();
   if(!v){ showAlert('今の表示の数字を入力してください（例 30.1）'); return; }
