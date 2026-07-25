@@ -100,15 +100,16 @@
       style="flex:2;min-width:130px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:var(--mono);font-size:14px">
     <button id="btnCal">この値で校正</button>
     <button id="btnUncal">校正を解除</button>
+    <button id="btnGridReset">格子を初期値へ</button>
   </div>
   <div class="note">下のプレビューに緑の格子が出ます。<b>1マスに数字1つ</b>ずつ入るように、次の4本で合わせてから校正してください。</div>
-  <label class="ctl"><span>格子 左</span><input type="range" id="gL" min="0" max="900" value="20"><output id="gLV">2%</output></label>
-  <label class="ctl"><span>格子 右</span><input type="range" id="gR" min="100" max="1000" value="750"><output id="gRV">75%</output></label>
-  <label class="ctl"><span>格子 上</span><input type="range" id="gT" min="0" max="900" value="60"><output id="gTV">6%</output></label>
+  <label class="ctl"><span>格子 左</span><input type="range" id="gL" min="0" max="900" value="160"><output id="gLV">16%</output></label>
+  <label class="ctl"><span>格子 右</span><input type="range" id="gR" min="100" max="1000" value="810"><output id="gRV">81%</output></label>
+  <label class="ctl"><span>格子 上</span><input type="range" id="gT" min="0" max="900" value="90"><output id="gTV">9%</output></label>
   <label class="ctl"><span>格子 下</span><input type="range" id="gB" min="100" max="1000" value="960"><output id="gBV">96%</output></label>
-  <label class="ctl"><span>格子 回転</span><input type="range" id="gS" min="-200" max="200" value="0"><output id="gSV">0°</output></label>
+  <label class="ctl"><span>格子 回転</span><input type="range" id="gS" min="-200" max="200" value="27"><output id="gSV">2.7°</output></label>
   <label class="ctl"><span>桁の幅</span><input type="range" id="gW" min="40" max="100" value="100"><output id="gWV">100%</output></label>
-  <label class="ctl"><span>小数点の幅</span><input type="range" id="gD" min="0" max="60" value="0"><output id="gDV">0%</output></label>
+  <label class="ctl"><span>小数点の幅</span><input type="range" id="gD" min="0" max="60" value="30"><output id="gDV">30%</output></label>
   <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
@@ -171,6 +172,7 @@
 <div class="card">
   <div class="eyebrow">記録</div>
   <canvas id="chart"></canvas>
+  <div class="note">グラフを触るとその時刻の値が出ます（ダブルタップで解除）。</div>
   <div class="stats">
     <span>点数 <b id="stN">0</b></span>
     <span>最低 <b id="stMin">-</b></span>
@@ -186,6 +188,18 @@
 </div>
 
 <div class="card">
+  <div class="eyebrow">スプレッドシートへ送信</div>
+  <input id="gsUrl" placeholder="Apps Script の /exec URL" inputmode="url"
+    style="width:100%;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:var(--mono);font-size:11px">
+  <div class="row">
+    <button id="gsTest">接続テスト</button>
+    <button id="gsSend">今すぐ送信</button>
+    <button id="gsOpen">表示ページを開く</button>
+  </div>
+  <div class="note" id="gsState">未設定。設定すると記録が自動で送られ、このURLを他の端末で開くと今の気温が見られます。</div>
+</div>
+
+<div class="card">
   <div class="eyebrow">長時間記録のコツ</div>
   <div class="note">
     充電器につないだまま、スマホと温度計を両方とも動かないよう固定してください。記録中は画面の自動消灯を止めます（Wake Lock）が、他のアプリに切り替えるとカメラが止まります。<br>
@@ -194,6 +208,30 @@
 </div>
 
 <script>
+/* ---------- 保存先 ----------
+   Claudeのプレビューでは window.storage、GitHub Pages等では localStorage を使う */
+const STORE = (function(){
+  const has = (typeof window!=='undefined') && window.storage && window.storage.set;
+  if(has) return window.storage;
+  const P='templogger:';
+  return {
+    async set(k,v){ localStorage.setItem(P+k, v); return {key:k, value:v}; },
+    async get(k){ const v=localStorage.getItem(P+k); if(v===null) throw new Error('not found'); return {key:k, value:v}; },
+    async delete(k){ localStorage.removeItem(P+k); return {key:k, deleted:true}; },
+    async list(prefix){
+      const keys=[];
+      for(let i=0;i<localStorage.length;i++){
+        const kk=localStorage.key(i);
+        if(kk && kk.startsWith(P)){
+          const bare=kk.slice(P.length);
+          if(!prefix || bare.startsWith(prefix)) keys.push(bare);
+        }
+      }
+      return {keys};
+    }
+  };
+})();
+
 /* ---------- 状態 ---------- */
 const S = {
   cal: null,            // 校正データ（桁のセル位置と明るさの基準）
@@ -202,7 +240,7 @@ const S = {
   flushed: 0,
   running: false,
   timer: null,
-  ok: 0, ng: 0, pending:null, last:null,
+  ok: 0, ng: 0, pending:null, last:null, hover:null,
   fails: 0
 };
 const CHUNK = 360, FLUSH_EVERY = 30;
@@ -1026,6 +1064,63 @@ function paintDebug(r){
   $('dbgInfo').textContent = (r ? (r.ok ? '読み取り成功' : r.why) : '') + (kinds ? ' / 検出: '+kinds : '');
 }
 
+
+/* ---------- スプレッドシートへの送信 ----------
+   Apps Script は事前確認(preflight)に対応しないので、
+   Content-Type を text/plain にして「単純なリクエスト」にする */
+let gsQueue=[], gsSending=false, gsLastOk=null, gsFails=0;
+
+function gsUrl(){ return ($('gsUrl').value||'').trim(); }
+function gsShow(msg){ $('gsState').textContent=msg; }
+
+async function gsFlush(force){
+  const url=gsUrl();
+  if(!url || gsSending || !gsQueue.length) return;
+  if(!force && gsQueue.length<10 && Date.now()-(gsLastOk||0) < 60000) return;
+  gsSending=true;
+  const batch=gsQueue.slice(0, 200);
+  try{
+    const res=await fetch(url,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({rows: batch.map(p=>[new Date(p[0]).toISOString(), p[1]])})
+    });
+    const txt=await res.text();
+    let ok=false;
+    try{ ok=JSON.parse(txt).ok===true; }catch(e){ ok=res.ok; }
+    if(ok){
+      gsQueue=gsQueue.slice(batch.length);
+      gsLastOk=Date.now(); gsFails=0;
+      gsShow('送信済み '+new Date().toLocaleTimeString('ja-JP')+'　待ち '+gsQueue.length+'件');
+    } else {
+      gsFails++; gsShow('送信に失敗しました（'+gsFails+'回）。待ち '+gsQueue.length+'件');
+    }
+  }catch(e){
+    gsFails++; gsShow('送信できません（'+gsFails+'回）。URLと公開設定を確認してください。待ち '+gsQueue.length+'件');
+  } finally { gsSending=false; }
+}
+setInterval(()=>gsFlush(false), 20000);
+
+$('gsTest').onclick = async ()=>{
+  const url=gsUrl();
+  if(!url){ gsShow('URLを入れてください'); return; }
+  gsShow('確認中…');
+  try{
+    const r=await fetch(url+(url.includes('?')?'&':'?')+'format=json');
+    const d=await r.json();
+    if(d.ok) gsShow(d.empty ? '接続できました（まだ記録なし）' : '接続できました。最新 '+d.temp+'°C（'+d.at+'）');
+    else gsShow('応答が想定と違います: '+JSON.stringify(d).slice(0,80));
+  }catch(e){ gsShow('つながりません。URLが /exec で終わっているか、アクセス権が「全員」か確認してください'); }
+  saveMeta();
+};
+$('gsSend').onclick = ()=>{
+  // 未送信ぶんが無ければ、記録済みの全データを送る
+  if(!gsQueue.length) gsQueue=S.points.slice();
+  gsFlush(true);
+};
+$('gsOpen').onclick = ()=>{ const u=gsUrl(); if(u) window.open(u,'_blank'); };
+$('gsUrl').addEventListener('change', saveMeta);
+
 /* ---------- 記録ループ ---------- */
 let wakeLock=null;
 async function acquireWake(){
@@ -1045,7 +1140,9 @@ function tick(){
       if(S.pending!==r.value && S.last!==r.value){ S.pending=r.value; return; }
       S.pending=null; S.last=r.value;
       S.ok++; S.fails=0;
-      S.points.push([Date.now(), r.value]);
+      const rec=[Date.now(), r.value];
+      S.points.push(rec);
+      if(gsUrl()) gsQueue.push(rec);
       $('curVal').innerHTML = r.str + '<small>°C</small>';
       $('curStamp').textContent = new Date().toLocaleTimeString('ja-JP');
       if(S.points.length - S.flushed >= FLUSH_EVERY) flush();
@@ -1071,6 +1168,7 @@ function stop(){
   $('btnStart').textContent='記録を開始'; $('btnStart').classList.add('primary'); $('btnStart').classList.remove('stop','rec');
   if(wakeLock){ wakeLock.release().catch(()=>{}); wakeLock=null; }
   flush();
+  gsFlush(true);
 }
 $('btnStart').onclick = ()=> S.running ? stop() : start();
 $('btnTest').onclick = ()=>{ if(S.cal) paintDebug(burstRead()); else previewGrid(); };
@@ -1079,6 +1177,11 @@ function showCal(){
     ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
     : '未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。';
 }
+const GRID_DEFAULT={gL:160,gR:810,gT:90,gB:960,gS:27,gW:100,gD:30};
+$('btnGridReset').onclick = ()=>{
+  for(const k in GRID_DEFAULT) $(k).value=GRID_DEFAULT[k];
+  gridLabels(); drawOverlay(); previewGrid(); saveMeta();
+};
 $('btnUncal').onclick = ()=>{ S.cal=null; saveMeta(); showCal(); previewGrid(); };
 $('btnCal').onclick = ()=>{
   const v=$('calVal').value.trim();
@@ -1107,23 +1210,24 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
     const from=Math.floor(S.flushed/CHUNK), to=Math.floor(Math.max(0,S.points.length-1)/CHUNK);
     for(let c=from;c<=to;c++){
       const slice=S.points.slice(c*CHUNK,(c+1)*CHUNK);
-      if(slice.length) await window.storage.set('tlog:'+String(c).padStart(5,'0'), JSON.stringify(slice), false);
+      if(slice.length) await STORE.set('tlog:'+String(c).padStart(5,'0'), JSON.stringify(slice), false);
     }
     S.flushed=S.points.length;
   }catch(e){ showAlert('保存に失敗しました。CSVを手動で書き出してください。'); }
 }
 async function load(){
   try{
-    const m=await window.storage.get('tmeta', false);
+    const m=await STORE.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
+      if(o.gsUrl) $('gsUrl').value=o.gsUrl;
       if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
@@ -1135,10 +1239,10 @@ async function load(){
     }
   }catch(e){}
   try{
-    const res=await window.storage.list('tlog:', false);
+    const res=await STORE.list('tlog:', false);
     const keys=(res && res.keys ? res.keys : []).slice().sort();
     for(const k of keys){
-      try{ const r=await window.storage.get(k,false); if(r) S.points.push(...JSON.parse(r.value)); }catch(e){}
+      try{ const r=await STORE.get(k,false); if(r) S.points.push(...JSON.parse(r.value)); }catch(e){}
     }
     S.points.sort((a,b)=>a[0]-b[0]);
     S.flushed=S.points.length; S.ok=S.points.length;
@@ -1154,6 +1258,14 @@ async function load(){
 
 /* ---------- グラフ ---------- */
 const chart=$('chart'), cctx=chart.getContext('2d');
+// 目盛りをきりのいい値（1,2,5の倍数）にする
+function niceStep(range, target){
+  const raw=range/target;
+  const mag=Math.pow(10, Math.floor(Math.log10(raw)));
+  const n=raw/mag;
+  const m = n<=1 ? 1 : n<=2 ? 2 : n<=5 ? 5 : 10;
+  return m*mag;   // 1,2,5系のみにする。ラベルの桁数が必ず刻みと一致する
+}
 function redraw(){
   const dpr=window.devicePixelRatio||1;
   const W=chart.clientWidth, H=170;
@@ -1162,29 +1274,92 @@ function redraw(){
   cctx.clearRect(0,0,W,H);
   const P=S.points;
   $('stN').textContent=P.length;
-  if(P.length<1){ cctx.fillStyle='#7e8d86'; cctx.font='12px sans-serif'; cctx.fillText('記録を開始するとここに折れ線が出ます',10,H/2); 
+  if(P.length<1){ cctx.fillStyle='#7e8d86'; cctx.font='12px sans-serif'; cctx.fillText('記録を開始するとここに折れ線が出ます',10,H/2);
     $('stMin').textContent=$('stMax').textContent=$('stAvg').textContent='-'; return; }
   const vs=P.map(p=>p[1]);
   const mn=Math.min(...vs), mx=Math.max(...vs), av=vs.reduce((a,b)=>a+b,0)/vs.length;
   $('stMin').textContent=mn.toFixed(1); $('stMax').textContent=mx.toFixed(1); $('stAvg').textContent=av.toFixed(2);
-  const pad=6, lo=mn-((mx-mn)||1)*0.15, hi=mx+((mx-mn)||1)*0.15;
+
+  // 表示範囲を目盛りの倍数まで広げる。線とラベルが必ず一致する
+  const span=(mx-mn)||0.4;
+  const step=niceStep(span*1.25, 5);
+  const lo=Math.floor((mn-span*0.1)/step)*step;
+  const hi=Math.ceil((mx+span*0.1)/step)*step;
+  const dec=Math.max(0, -Math.floor(Math.log10(step)));
+
+  const padT=8, padB=18, padL=34, padR=6;
   const t0=P[0][0], t1=P[P.length-1][0]||t0+1;
-  const X=t=>28+(W-28-pad)*((t-t0)/((t1-t0)||1));
-  const Y=v=>H-18-(H-18-pad)*((v-lo)/((hi-lo)||1));
-  cctx.strokeStyle='#2b3733'; cctx.lineWidth=1; cctx.fillStyle='#7e8d86'; cctx.font='9px monospace';
-  for(let i=0;i<=3;i++){
-    const v=lo+(hi-lo)*i/3, y=Y(v);
-    cctx.beginPath(); cctx.moveTo(28,y); cctx.lineTo(W-pad,y); cctx.stroke();
-    cctx.fillText(v.toFixed(1), 2, y+3);
+  const X=t=>padL+(W-padL-padR)*((t-t0)/((t1-t0)||1));
+  const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
+  chartMap={X,Y,t0,t1,lo,hi,padL,padR,padT,padB,W,H};
+
+  cctx.font='9px monospace'; cctx.textBaseline='middle';
+  for(let v=lo; v<=hi+step*1e-6; v+=step){
+    const y=Y(v);
+    cctx.strokeStyle='#2b3733'; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(padL,Math.round(y)+0.5); cctx.lineTo(W-padR,Math.round(y)+0.5); cctx.stroke();
+    cctx.fillStyle='#7e8d86';
+    cctx.fillText(v.toFixed(dec), 2, y);      // 線と同じ値をそのまま表示する
   }
-  const step=Math.max(1,Math.ceil(P.length/600));
+  cctx.textBaseline='alphabetic';
+
+  const stepN=Math.max(1,Math.ceil(P.length/600));
   cctx.strokeStyle='#33c76e'; cctx.lineWidth=1.5; cctx.beginPath();
-  for(let i=0;i<P.length;i+=step){ const x=X(P[i][0]), y=Y(P[i][1]); i?cctx.lineTo(x,y):cctx.moveTo(x,y); }
+  for(let i=0;i<P.length;i+=stepN){ const x=X(P[i][0]), y=Y(P[i][1]); i?cctx.lineTo(x,y):cctx.moveTo(x,y); }
   cctx.stroke();
+  // 点が少ないときは丸も打つ（目盛りとの対応が見える）
+  if(P.length<=60){
+    cctx.fillStyle='#33c76e';
+    for(const p of P){ cctx.beginPath(); cctx.arc(X(p[0]),Y(p[1]),2,0,Math.PI*2); cctx.fill(); }
+  }
+  // タップした位置の点を強調表示する
+  if(S.hover!==null && S.hover>=0 && S.hover<P.length){
+    const hp=P[S.hover], hx=X(hp[0]), hy=Y(hp[1]);
+    cctx.strokeStyle='rgba(232,178,48,.8)'; cctx.lineWidth=1;
+    cctx.beginPath(); cctx.moveTo(hx,padT); cctx.lineTo(hx,H-padB); cctx.stroke();
+    cctx.fillStyle='#e8b230';
+    cctx.beginPath(); cctx.arc(hx,hy,3.5,0,Math.PI*2); cctx.fill();
+    const label=hp[1].toFixed(1)+'°C  '+new Date(hp[0]).toLocaleTimeString('ja-JP');
+    cctx.font='11px ui-monospace,monospace';
+    const tw=cctx.measureText(label).width+10;
+    let bx=hx-tw/2;
+    bx=Math.max(padL, Math.min(W-padR-tw, bx));
+    cctx.fillStyle='rgba(11,15,13,.92)';
+    cctx.fillRect(bx, padT, tw, 18);
+    cctx.strokeStyle='#2b3733'; cctx.strokeRect(bx+.5, padT+.5, tw-1, 17);
+    cctx.fillStyle='#dfe6e1'; cctx.textBaseline='middle';
+    cctx.fillText(label, bx+5, padT+9);
+    cctx.textBaseline='alphabetic';
+    cctx.font='9px monospace';
+  }
   cctx.fillStyle='#7e8d86';
-  cctx.fillText(new Date(t0).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}),28,H-5);
-  cctx.fillText(new Date(t1).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}),W-46,H-5);
+  cctx.fillText(new Date(t0).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'}),padL,H-5);
+  const et=new Date(t1).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+  cctx.fillText(et, W-padR-cctx.measureText(et).width, H-5);
 }
+let chartMap=null;
+// グラフを触ると、その位置の値と時刻を表示する
+function pickPoint(clientX){
+  if(!chartMap || !S.points.length) return;
+  const r=chart.getBoundingClientRect();
+  const x=clientX-r.left;
+  const {t0,t1,padL,padR,W}=chartMap;
+  const frac=(x-padL)/Math.max(1,(W-padL-padR));
+  const t=t0+(t1-t0)*Math.min(1,Math.max(0,frac));
+  // 時刻が一番近い点を探す
+  let best=0, bd=Infinity;
+  for(let i=0;i<S.points.length;i++){
+    const d=Math.abs(S.points[i][0]-t);
+    if(d<bd){ bd=d; best=i; }
+  }
+  S.hover=best; redraw();
+}
+chart.addEventListener('pointerdown', e=>{ chart.setPointerCapture(e.pointerId); pickPoint(e.clientX); });
+chart.addEventListener('pointermove', e=>{ if(e.buttons||e.pressure>0) pickPoint(e.clientX); });
+chart.addEventListener('pointerup', ()=>{});
+chart.addEventListener('dblclick', ()=>{ S.hover=null; redraw(); });
+chart.style.touchAction='none';
+
 window.addEventListener('resize', redraw);
 
 /* ---------- CSV ---------- */
@@ -1203,8 +1378,8 @@ $('btnCsv').onclick=()=>{
 $('btnCopy').onclick=()=>{ const t=$('csvOut'); t.value=csv(); t.style.display='block'; t.select(); };
 $('btnClear').onclick=async ()=>{
   if(!confirm('記録した全データを消します。よろしいですか？')) return;
-  try{ const res=await window.storage.list('tlog:',false);
-    for(const k of (res&&res.keys?res.keys:[])) await window.storage.delete(k,false);
+  try{ const res=await STORE.list('tlog:',false);
+    for(const k of (res&&res.keys?res.keys:[])) await STORE.delete(k,false);
   }catch(e){}
   S.points=[]; S.flushed=0; S.ok=0; S.ng=0;
   $('cntOk').textContent='0'; $('cntNg').textContent='0'; $('csvOut').style.display='none';
