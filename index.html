@@ -106,6 +106,7 @@
   <label class="ctl"><span>格子 右</span><input type="range" id="gR" min="100" max="1000" value="750"><output id="gRV">75%</output></label>
   <label class="ctl"><span>格子 上</span><input type="range" id="gT" min="0" max="900" value="60"><output id="gTV">6%</output></label>
   <label class="ctl"><span>格子 下</span><input type="range" id="gB" min="100" max="1000" value="960"><output id="gBV">96%</output></label>
+  <label class="ctl"><span>格子 回転</span><input type="range" id="gS" min="-200" max="200" value="0"><output id="gSV">0°</output></label>
   <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
@@ -296,14 +297,19 @@ function drawOverlay(){
     const n=(S.cal ? S.cal.n : ($('calVal').value.replace(/[^0-9]/g,'').length||3));
     const cells = S.cal ? S.cal.cells : gridCells(n);
     octx.lineWidth=2;
+    const deg = S.cal && S.cal.slant!==undefined ? S.cal.slant : Number($('gS').value)/10;
+    const gx0=ex+cells[0].x0*ew, gx1=ex+(cells[cells.length-1].x0+cells[0].w)*ew;
+    const rcx=(gx0+gx1)/2, rcy=ey+(cells[0].y0+cells[0].h/2)*eh;
+    octx.save();
+    octx.translate(rcx,rcy); octx.rotate(deg*Math.PI/180); octx.translate(-rcx,-rcy);
     cells.forEach(c=>{
       const cx=ex+c.x0*ew, cy=ey+c.y0*eh, cw=c.w*ew, ch=c.h*eh;
       octx.strokeStyle = S.cal ? 'rgba(51,199,110,.95)' : 'rgba(51,199,110,.8)';
-      octx.strokeRect(cx,cy,cw,ch);
+      octx.lineWidth=2; octx.strokeRect(cx,cy,cw,ch);
       octx.strokeStyle='rgba(255,255,255,.45)'; octx.lineWidth=1;
       octx.beginPath(); octx.moveTo(cx,cy+ch*0.5); octx.lineTo(cx+cw,cy+ch*0.5); octx.stroke();
-      octx.lineWidth=2;
     });
+    octx.restore();
   }
   requestAnimationFrame(()=>{});
 }
@@ -733,31 +739,51 @@ const SEGK = ['a','b','c','d','e','f','g'];
 const PAT = {};
 for(const bits in SEGMAP) PAT[SEGMAP[bits]] = bits;
 
-// 灰色画像から、指定枠の各セグメントの平均輝度を取る
-function segGray(src, cell){
+// 灰色画像から、各セグメントの平均輝度を取る。格子全体の回転に追従する
+function segGray(src, cell, slant, centre){
   const {gray,w,h}=src;
+  const deg = (slant===undefined) ? (Number($('gS').value)/10) : slant;
+  const rad = deg*Math.PI/180, cs=Math.cos(rad), sn=Math.sin(rad);
+  // 回転の中心は格子全体の中心（各桁ごとではなく、表示板ごと傾いているため）
+  const cx = centre ? centre.x : cell.x0+cell.w/2;
+  const cy = centre ? centre.y : cell.y0+cell.h/2;
   const out=[];
   for(const k of SEGK){
     const r=SEGR[k];
-    const x0=Math.max(0,Math.round(cell.x0 + r[0]*cell.w)), x1=Math.min(w-1,Math.round(cell.x0+(r[0]+r[2])*cell.w));
-    const y0=Math.max(0,Math.round(cell.y0 + r[1]*cell.h)), y1=Math.min(h-1,Math.round(cell.y0+(r[1]+r[3])*cell.h));
-    let s=0,n=0;
-    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){ s+=gray[y*w+x]; n++; }
-    out.push(n? s/n : 0);
+    const rx0=cell.x0 + r[0]*cell.w, rx1=cell.x0 + (r[0]+r[2])*cell.w;
+    const ry0=cell.y0 + r[1]*cell.h, ry1=cell.y0 + (r[1]+r[3])*cell.h;
+    const nx=8, ny=8;                       // 区画内を格子状に拾う
+    let sum=0,n=0;
+    for(let j=0;j<ny;j++) for(let i=0;i<nx;i++){
+      const gx = rx0 + (rx1-rx0)*(i+0.5)/nx;
+      const gy = ry0 + (ry1-ry0)*(j+0.5)/ny;
+      const dx=gx-cx, dy=gy-cy;
+      const px = Math.round(cx + dx*cs - dy*sn);
+      const py = Math.round(cy + dx*sn + dy*cs);
+      if(px<0||py<0||px>=w||py>=h) continue;
+      sum += gray[py*w+px]; n++;
+    }
+    out.push(n? sum/n : 0);
   }
   return out;
 }
-function otsuOn(vals){          // 数値の並びを2群に分ける境界
-  if(vals.length<2) return null;
+
+// 数値の並びを2群に分ける境界と、その分離度（0〜1）を返す
+function otsuOn(vals){
+  const n=vals.length;
+  if(n<2) return {th:null, eta:0};
   const v=[...vals].sort((a,b)=>a-b);
-  let best=null, th=null;
-  for(let i=1;i<v.length;i++){
-    const A=v.slice(0,i), Bv=v.slice(i);
-    const ma=A.reduce((x,y)=>x+y,0)/A.length, mb=Bv.reduce((x,y)=>x+y,0)/Bv.length;
-    const sc=A.length*Bv.length*(ma-mb)*(ma-mb);
-    if(best===null||sc>best){ best=sc; th=(v[i-1]+v[i])/2; }
+  const mean=v.reduce((a,b)=>a+b,0)/n;
+  const tvar=v.reduce((a,b)=>a+(b-mean)*(b-mean),0)/n;
+  if(tvar<1e-9) return {th:null, eta:0};
+  let best=-1, th=null;
+  for(let i=1;i<n;i++){
+    const A=v.slice(0,i), B=v.slice(i);
+    const ma=A.reduce((x,y)=>x+y,0)/A.length, mb=B.reduce((x,y)=>x+y,0)/B.length;
+    const bcv=A.length*B.length/(n*n)*(ma-mb)*(ma-mb);
+    if(bcv>best){ best=bcv; th=(v[i-1]+v[i])/2; }
   }
-  return th;
+  return {th, eta:best/tvar};
 }
 
 // 校正：今のフレームから桁の枠を求め、等間隔のセルとして記録する
@@ -779,10 +805,12 @@ function calibrate(expected){
   if(!chars.length) return {ok:false, why:'数字を入力してください'};
   const cells=gridCells(chars.length);
   if(cells[0].w*src.w < 6) return {ok:false, why:'格子が細すぎます。左右の幅を広げてください'};
+  const centre={ x:(cells[0].x0 + cells[cells.length-1].x0 + cells[0].w)/2*src.w,
+                 y:(cells[0].y0 + cells[0].h/2)*src.h };
   const on=[], off=[];
   cells.forEach((c,i)=>{
     const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
-    const g=segGray(src,cell), p=PAT[chars[i]];
+    const g=segGray(src,cell,undefined,centre), p=PAT[chars[i]];
     if(!p) return;
     for(let k=0;k<7;k++) (p[k]==='1'?on:off).push(g[k]);
   });
@@ -792,7 +820,7 @@ function calibrate(expected){
   if(Math.abs(mOn-mOff) < 6)
     return {ok:false, why:'明暗の差が小さすぎます。格子が数字に合っているか、照明を確認してください'};
   const dot=expected.replace(/[^0-9.]/g,'').indexOf('.');
-  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dot };
+  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dot, slant:Number($('gS').value)/10 };
   saveMeta();
   return {ok:true, n:chars.length};
 }
@@ -802,37 +830,46 @@ function readCalibrated(){
   const src=grabROI();
   if(!src) return {ok:false, why:'カメラ待ち'};
   const cal=S.cal;
+  const cc=cal.cells;
+  const centre={ x:(cc[0].x0 + cc[cc.length-1].x0 + cc[0].w)/2*src.w,
+                 y:(cc[0].y0 + cc[0].h/2)*src.h };
   const all=[], per=[];
-  for(const c of cal.cells){
+  for(const c of cc){
     const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
-    const g=segGray(src,cell);
+    const g=segGray(src,cell,cal.slant,centre);
     per.push({cell,g}); all.push(...g);
   }
-  // フレームごとに、その場の明るさで点灯・消灯の境界を引き直す
-  const mid=(cal.mOn+cal.mOff)/2, gap=Math.abs(cal.mOn-cal.mOff);
-  const spread=Math.max(...all)-Math.min(...all);
-  let th=otsuOn(all);
-  if(th===null || spread < gap*0.5) th=mid;      // 全桁が同じ状態なら学習した基準を使う
-  else {
-    const lo=Math.min(cal.mOn,cal.mOff), hi=Math.max(cal.mOn,cal.mOff);
-    th=Math.min(Math.max(th, lo+gap*0.15), hi-gap*0.15);
-  }
+  // フレームごとに境界を引き直す。分離度が低い＝全桁同じ状態なので校正値を使う
+  const o=otsuOn(all);
+  let th = (o.th===null || o.eta < 0.55) ? (cal.mOn+cal.mOff)/2 : o.th;
   const dark=cal.dark;
-  let text='', worst=1e9;
+  const need = Number($('segTh').value)/100;
+  let text='';
   const boxes=[];
   per.forEach(({cell,g})=>{
     let bits='';
-    for(let k=0;k<7;k++){
-      const on = dark ? (g[k]<th) : (g[k]>th);
-      bits += on?'1':'0';
-      worst=Math.min(worst, Math.abs(g[k]-th));
+    for(let k=0;k<7;k++) bits += (dark ? (g[k]<th) : (g[k]>th)) ? '1':'0';
+    let kind, ch;
+    if(SEGMAP[bits]){ ch=SEGMAP[bits]; kind=ch; }
+    else {
+      // 表に無いパターンのときだけ、一番近い数字を選ぶ
+      const rng=Math.max(1e-6, Math.max(...g.map(v=>Math.abs(v-th))));
+      const nm=g.map(v=>Math.min(1,Math.max(0, (dark?(th-v):(v-th))/rng/2 + 0.5)));
+      const res=[];
+      for(const b in SEGMAP){
+        let dsum=0;
+        for(let k=0;k<7;k++) dsum += Math.abs(nm[k]-(b[k]==='1'?1:0));
+        res.push({d:SEGMAP[b], dist:dsum/7});
+      }
+      res.sort((a,b)=>a.dist-b.dist);
+      const margin=res[1].dist-res[0].dist;
+      if(margin>=need){ ch=res[0].d; kind=ch+'*'; }
+      else { ch='?'; kind='?'+res[0].d+':'+margin.toFixed(2); }
     }
-    const d=SEGMAP[bits];
-    text += d || '?';
-    boxes.push({x0:cell.x0, y0:cell.y0, w:cell.w, h:cell.h, kind:d||'?'});
+    text += ch;
+    boxes.push({x0:cell.x0, y0:cell.y0, w:cell.w, h:cell.h, kind});
   });
-  if(text.includes('?')) return {ok:false, why:'照合できない '+text, src, boxes};
-  if(worst < 3) return {ok:false, why:'明暗の差が小さい', src, boxes};
+  if(text.includes('?')) return {ok:false, why:'自信が足りない '+text, src, boxes};
   let str=text;
   const mode=$('decimals').value;
   if(cal.dec>0) str=text.slice(0,cal.dec)+'.'+text.slice(cal.dec);
@@ -912,6 +949,11 @@ function drawGrid(src, cells, colour){
   if(src.raw) rctx.putImageData(src.raw,0,0);
   if(!cells) return;
   rctx.lineWidth=1;
+  const deg = S.cal && S.cal.slant!==undefined ? S.cal.slant : Number($('gS').value)/10;
+  const rcx=((cells[0].x0+cells[cells.length-1].x0+cells[0].w)/2)*src.w;
+  const rcy=(cells[0].y0+cells[0].h/2)*src.h;
+  rctx.save();
+  rctx.translate(rcx,rcy); rctx.rotate(deg*Math.PI/180); rctx.translate(-rcx,-rcy);
   cells.forEach(c=>{
     const x=c.x0*src.w, y=c.y0*src.h, w=c.w*src.w, h=c.h*src.h;
     rctx.strokeStyle=colour;
@@ -920,6 +962,7 @@ function drawGrid(src, cells, colour){
     rctx.strokeStyle='rgba(255,255,255,.35)';
     rctx.beginPath(); rctx.moveTo(x, y+h*0.5); rctx.lineTo(x+w, y+h*0.5); rctx.stroke();
   });
+  rctx.restore();
 }
 
 // 格子合わせ用のプレビュー（校正前でも見られる）
@@ -1037,7 +1080,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1054,7 +1097,7 @@ async function load(){
     const m=await window.storage.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
-      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; }
+      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
       if(o.thOff)$('thOff').value=o.thOff;
@@ -1144,12 +1187,13 @@ $('btnClear').onclick=async ()=>{
 /* ---------- 設定UI ---------- */
 function gridLabels(){
   for(const id of ['gL','gR','gT','gB']) $(id+'V').textContent=(Number($(id).value)/10).toFixed(0)+'%';
+  $('gSV').textContent=(Number($('gS').value)/10).toFixed(1)+'°';
 }
 function syncLabels(){
   $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; gridLabels();
 }
 let gridTimer=null;
-for(const id of ['gL','gR','gT','gB']){
+for(const id of ['gL','gR','gT','gB','gS']){
   $(id).addEventListener('input', ()=>{
     // 左右・上下が逆転しないようにする
     if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
