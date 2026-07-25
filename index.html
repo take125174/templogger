@@ -107,6 +107,7 @@
   <label class="ctl"><span>格子 上</span><input type="range" id="gT" min="0" max="900" value="60"><output id="gTV">6%</output></label>
   <label class="ctl"><span>格子 下</span><input type="range" id="gB" min="100" max="1000" value="960"><output id="gBV">96%</output></label>
   <label class="ctl"><span>格子 回転</span><input type="range" id="gS" min="-200" max="200" value="0"><output id="gSV">0°</output></label>
+  <label class="ctl"><span>桁の幅</span><input type="range" id="gW" min="40" max="100" value="100"><output id="gWV">100%</output></label>
   <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
@@ -306,8 +307,12 @@ function drawOverlay(){
       const cx=ex+c.x0*ew, cy=ey+c.y0*eh, cw=c.w*ew, ch=c.h*eh;
       octx.strokeStyle = S.cal ? 'rgba(51,199,110,.95)' : 'rgba(51,199,110,.8)';
       octx.lineWidth=2; octx.strokeRect(cx,cy,cw,ch);
-      octx.strokeStyle='rgba(255,255,255,.45)'; octx.lineWidth=1;
-      octx.beginPath(); octx.moveTo(cx,cy+ch*0.5); octx.lineTo(cx+cw,cy+ch*0.5); octx.stroke();
+      // 実際に明るさを測っている7区画。これが数字の線に重なっていれば正しい
+      octx.strokeStyle='rgba(232,178,48,.9)'; octx.lineWidth=1;
+      for(const k of SEGK){
+        const r=SEGR[k];
+        octx.strokeRect(cx+r[0]*cw, cy+r[1]*ch, r[2]*cw, r[3]*ch);
+      }
     });
     octx.restore();
   }
@@ -791,9 +796,12 @@ function otsuOn(vals){
 function gridCells(n){
   const l=Number($('gL').value)/1000, r=Number($('gR').value)/1000;
   const t=Number($('gT').value)/1000, b=Number($('gB').value)/1000;
-  const cw=(r-l)/n;
+  const frac=Number($('gW').value)/100;      // 桁の幅（間隔に対する割合）
+  const pitch=(r-l)/n;
+  const cw=pitch*frac;
+  const pad=(pitch-cw)/2;
   const cells=[];
-  for(let i=0;i<n;i++) cells.push({x0:l+i*cw, y0:t, w:cw, h:b-t});
+  for(let i=0;i<n;i++) cells.push({x0:l+i*pitch+pad, y0:t, w:cw, h:b-t});
   return cells;
 }
 
@@ -958,9 +966,11 @@ function drawGrid(src, cells, colour){
     const x=c.x0*src.w, y=c.y0*src.h, w=c.w*src.w, h=c.h*src.h;
     rctx.strokeStyle=colour;
     rctx.strokeRect(x+.5,y+.5,w-1,h-1);
-    // 中央の横線＝セグメントgの位置。数字の中央にくるのが目安
-    rctx.strokeStyle='rgba(255,255,255,.35)';
-    rctx.beginPath(); rctx.moveTo(x, y+h*0.5); rctx.lineTo(x+w, y+h*0.5); rctx.stroke();
+    rctx.strokeStyle='rgba(232,178,48,.9)';
+    for(const k of SEGK){
+      const r=SEGR[k];
+      rctx.strokeRect(x+r[0]*w, y+r[1]*h, r[2]*w, r[3]*h);
+    }
   });
   rctx.restore();
 }
@@ -1080,7 +1090,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1097,7 +1107,7 @@ async function load(){
     const m=await window.storage.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
-      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; }
+      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
       if(o.thOff)$('thOff').value=o.thOff;
@@ -1188,12 +1198,13 @@ $('btnClear').onclick=async ()=>{
 function gridLabels(){
   for(const id of ['gL','gR','gT','gB']) $(id+'V').textContent=(Number($(id).value)/10).toFixed(0)+'%';
   $('gSV').textContent=(Number($('gS').value)/10).toFixed(1)+'°';
+  $('gWV').textContent=$('gW').value+'%';
 }
 function syncLabels(){
   $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; gridLabels();
 }
 let gridTimer=null;
-for(const id of ['gL','gR','gT','gB','gS']){
+for(const id of ['gL','gR','gT','gB','gS','gW']){
   $(id).addEventListener('input', ()=>{
     // 左右・上下が逆転しないようにする
     if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
