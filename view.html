@@ -100,12 +100,14 @@
 
 <div id="remote" class="panel" style="display:none">
   <div class="lbl">遠隔で校正</div>
-  <img id="snap" alt="カメラ画像" style="width:100%;border-radius:7px;background:#000;display:block">
+  <button class="go" id="refreshSnap">今の画像を取得</button>
+  <img id="snap" alt="" style="width:100%;border-radius:7px;background:#000;display:none;margin-top:10px">
   <div id="snapAt" style="font-size:11px;color:var(--muted);font-family:var(--mono);margin:6px 0 10px"></div>
-  <div class="lbl">この画像に写っている数字を入力</div>
-  <input id="calVal" inputmode="decimal" placeholder="例 34.3">
-  <button class="go" id="sendCal">この値で校正させる</button>
-  <button id="refreshSnap">画像を今すぐ取り直す</button>
+  <div id="calBox" style="display:none">
+    <div class="lbl">この画像に写っている数字を入力</div>
+    <input id="calVal" inputmode="decimal" placeholder="例 34.3">
+    <button class="go" id="sendCal">この値で校正させる</button>
+  </div>
   <div id="cmdState" style="font-size:12px;color:var(--muted);margin-top:9px;line-height:1.6"></div>
 </div>
 
@@ -405,21 +407,55 @@ $('notify').onclick=async ()=>{
 
 
 /* ---------- 遠隔で校正 ---------- */
-let snapSeen='';
-async function loadSnap(){
+// 画像は「取得」を押したときだけ、その瞬間のものを撮ってもらう
+let snapAtSeen='', snapTakenAt=0;
+
+async function fetchSnap(){
   const url=endpoint();
-  if(!url || $('remote').style.display!=='block') return;
-  try{
-    const r=await fetch(url+(url.includes('?')?'&':'?')+'what=snapshot&_='+Date.now());
-    const d=await r.json();
-    if(d && d.ok && d.image){
-      if(d.image!==snapSeen){ $('snap').src=d.image; snapSeen=d.image; }
-      $('snapAt').textContent='撮影 '+(d.at||'—')+(d.ageSec!=null? '（'+d.ageSec+'秒前）':'');
-    } else {
-      $('snapAt').textContent='画像がまだ届いていません。記録側で「遠隔操作」を有効にしてください。';
-    }
-  }catch(e){ $('snapAt').textContent='画像を取得できません'; }
+  const r=await fetch(url+(url.includes('?')?'&':'?')+'what=snapshot&_='+Date.now());
+  return await r.json();
 }
+
+async function requestSnapshot(){
+  const url=endpoint();
+  if(!url){ $('cmdState').textContent='接続先が未設定です'; return; }
+  $('refreshSnap').disabled=true;
+  $('cmdState').textContent='記録側に撮影を要求しています…';
+  // 今ある画像の時刻を控えて、新しいものが来たか判定する
+  try{ const cur=await fetchSnap(); snapAtSeen = (cur && cur.at) || ''; }catch(e){}
+  try{
+    const res=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({cmd:{id:String(Date.now()), type:'snapshot'}})});
+    const d=await res.json();
+    if(!d.ok) throw new Error(d.error||'送信に失敗');
+  }catch(e){
+    $('cmdState').textContent='要求を送れません: '+e;
+    $('refreshSnap').disabled=false; return;
+  }
+  waitForSnap(0);
+}
+
+async function waitForSnap(n){
+  if(n>15){
+    $('cmdState').textContent='画像が届きません。記録側の画面が開いていて、「遠隔操作」が有効か確認してください。';
+    $('refreshSnap').disabled=false; return;
+  }
+  try{
+    const d=await fetchSnap();
+    if(d && d.ok && d.image && d.at && d.at!==snapAtSeen){
+      $('snap').src=d.image;
+      $('snap').style.display='block';
+      $('calBox').style.display='block';
+      snapTakenAt=Date.now();
+      $('snapAt').textContent='撮影 '+d.at+'　この画像の数字を読んで入力してください';
+      $('cmdState').textContent='';
+      $('refreshSnap').disabled=false;
+      return;
+    }
+  }catch(e){}
+  setTimeout(()=>waitForSnap(n+1), 1500);
+}
+
 async function sendCmd(cmd){
   const url=endpoint();
   if(!url) return;
@@ -429,37 +465,44 @@ async function sendCmd(cmd){
       body: JSON.stringify({cmd:Object.assign({id:String(Date.now())}, cmd)})});
     const d=await r.json();
     if(!d.ok) throw new Error(d.error||'送信に失敗');
-    $('cmdState').textContent='指示を送りました。記録側が受け取るまで最大10秒ほどかかります。';
+    $('cmdState').textContent='指示を送りました。結果を待っています…';
     pollResult(0);
   }catch(e){ $('cmdState').textContent='送信できません: '+e; }
 }
+
 async function pollResult(n){
-  if(n>12) { $('cmdState').textContent='応答がありません。記録側が動いているか確認してください。'; return; }
+  if(n>15){ $('cmdState').textContent='応答がありません。記録側が動いているか確認してください。'; return; }
   const url=endpoint();
   try{
     const r=await fetch(url+(url.includes('?')?'&':'?')+'what=cmd&_='+Date.now());
     const d=await r.json();
     if(d && d.ok && d.result){
-      $('cmdState').textContent=(d.result.ok?'✓ ':'× ')+d.result.msg;
-      loadSnap();
+      $('cmdState').textContent=(d.result.ok?'\u2713 ':'\u00d7 ')+d.result.msg;
+      // 校正後の画像に差し替える
+      try{
+        const sn=await fetchSnap();
+        if(sn && sn.image){ $('snap').src=sn.image; $('snapAt').textContent='校正後 '+(sn.at||''); }
+      }catch(e){}
       return;
     }
   }catch(e){}
-  setTimeout(()=>pollResult(n+1), 3000);
+  setTimeout(()=>pollResult(n+1), 1500);
 }
+
 $('openRemote').onclick=e=>{
   e.preventDefault();
   const el=$('remote');
   el.style.display = el.style.display==='block' ? 'none' : 'block';
-  if(el.style.display==='block') loadSnap();
 };
+$('refreshSnap').onclick=requestSnapshot;
 $('sendCal').onclick=()=>{
   const v=$('calVal').value.trim();
   if(!v){ $('cmdState').textContent='画像に写っている数字を入力してください'; return; }
+  const age=(Date.now()-snapTakenAt)/1000;
+  if(snapTakenAt && age>90 &&
+     !confirm('画像を取得してから'+Math.round(age)+'秒経っています。\n表示が変わっている可能性があります。取得し直さずに続けますか？')) return;
   sendCmd({type:'calibrate', value:v});
 };
-$('refreshSnap').onclick=()=>sendCmd({type:'snapshot'});
-setInterval(loadSnap, 10000);
 
 load();
 setInterval(load,5000);
