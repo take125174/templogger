@@ -206,6 +206,14 @@
       <option value="60">60秒</option>
     </select>
   </label>
+  <label class="ctl"><span>遠隔操作</span>
+    <select id="gsRemote">
+      <option value="0">使わない</option>
+      <option value="30" selected>画像を30秒ごとに送る</option>
+      <option value="10">画像を10秒ごとに送る</option>
+      <option value="120">画像を2分ごとに送る</option>
+    </select>
+  </label>
   <div class="note" id="gsState">未設定。設定すると記録が自動で送られ、このURLを他の端末で開くと今の気温が見られます。</div>
 </div>
 
@@ -1240,6 +1248,98 @@ $('gsReset').onclick = async ()=>{
 };
 $('gsUrl').addEventListener('change', saveMeta);
 $('gsEvery').addEventListener('change', saveMeta);
+$('gsRemote').addEventListener('change', saveMeta);
+
+
+/* ---------- 遠隔操作 ----------
+   カメラ画像を定期的に送り、閲覧ページからの校正指示を受け取る */
+let snapLast=0, cmdLast=0, remoteBusy=false;
+
+function snapshotDataUrl(){
+  const src=grabROI();
+  if(!src) return null;
+  // 切り出した範囲を、そのまま画像として書き出す
+  const c=document.createElement('canvas');
+  c.width=src.w; c.height=src.h;
+  const cx=c.getContext('2d');
+  if(src.raw) cx.putImageData(src.raw,0,0); else return null;
+  // 格子を重ねて、ズレ具合が遠隔でも分かるようにする
+  const n=S.cal? S.cal.n : 3;
+  const cells=S.cal? S.cal.cells : gridCells(n);
+  const deg=(S.cal && S.cal.slant!==undefined)? S.cal.slant : Number($('gS').value)/10;
+  const rcx=((cells[0].x0+cells[cells.length-1].x0+cells[0].w)/2)*src.w;
+  const rcy=(cells[0].y0+cells[0].h/2)*src.h;
+  cx.save(); cx.translate(rcx,rcy); cx.rotate(deg*Math.PI/180); cx.translate(-rcx,-rcy);
+  cx.strokeStyle='rgba(51,199,110,.9)'; cx.lineWidth=1;
+  for(const cc of cells) cx.strokeRect(cc.x0*src.w, cc.y0*src.h, cc.w*src.w, cc.h*src.h);
+  cx.restore();
+  try{ return c.toDataURL('image/jpeg', 0.6); }catch(e){ return null; }
+}
+
+async function remoteTick(){
+  const url=gsUrl();
+  const every=Number($('gsRemote').value||0);
+  if(!url || !every || remoteBusy) return;
+  const now=Date.now();
+
+  // 画像を送る
+  if(now-snapLast > every*1000){
+    const img=snapshotDataUrl();
+    if(img){
+      remoteBusy=true;
+      try{
+        await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+          body: JSON.stringify({snapshot:img, cal: S.cal? {n:S.cal.n, dec:S.cal.dec} : null})});
+        snapLast=now;
+      }catch(e){}
+      remoteBusy=false;
+    } else snapLast=now;
+  }
+
+  // 指示を確認する
+  if(now-cmdLast > 8000){
+    cmdLast=now;
+    try{
+      const r=await fetch(url+(url.includes('?')?'&':'?')+'what=cmd&_='+now);
+      const d=await r.json();
+      if(d && d.ok && d.cmd) await runCommand(d.cmd, url);
+    }catch(e){}
+  }
+}
+setInterval(remoteTick, 3000);
+
+async function runCommand(cmd, url){
+  let result={ok:false, msg:'不明な指示'};
+  try{
+    if(cmd.type==='calibrate' && cmd.value){
+      const chars=String(cmd.value).replace(/[^0-9]/g,'');
+      const dec=String(cmd.value).replace(/[^0-9.]/g,'').indexOf('.');
+      const src=grabROI();
+      if(!src) result={ok:false,msg:'カメラが動いていません'};
+      else if(!chars.length) result={ok:false,msg:'数字がありません'};
+      else{
+        const before=gridScore(src,gridParams(),chars,dec);
+        const fit=refineGrid(src,chars,dec,gridParams());
+        if(fit.score>before){ setGridParams(fit.p); applyGridToCal(); drawOverlay(); }
+        const c=calibrate(String(cmd.value));
+        if(c.ok){
+          S.last=null; S.pending=null; showCal();
+          const t=burstRead(); paintDebug(t);
+          result={ok:true, msg:'校正しました（一致度 '+before.toFixed(2)+'→'+fit.score.toFixed(2)+'）'
+            + (t.ok? ' 読み取り '+t.str+'°C' : ' 読み取り: '+t.why)};
+        } else result={ok:false,msg:'校正に失敗: '+c.why};
+      }
+    } else if(cmd.type==='snapshot'){
+      snapLast=0;                       // 次の巡回ですぐ送る
+      result={ok:true,msg:'画像を送ります'};
+    }
+  }catch(e){ result={ok:false,msg:String(e)}; }
+  try{
+    await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({cmdResult:{id:cmd.id, ok:result.ok, msg:result.msg, at:new Date().toISOString()}})});
+  }catch(e){}
+  gsShow('遠隔指示: '+result.msg);
+}
 
 /* ---------- 記録ループ ---------- */
 let wakeLock=null;
@@ -1360,7 +1460,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1379,6 +1479,7 @@ async function load(){
       if(o.cal) S.cal=o.cal;
       if(o.gsUrl) $('gsUrl').value=o.gsUrl;
       if(o.gsEvery) $('gsEvery').value=o.gsEvery;
+      if(o.gsRemote) $('gsRemote').value=o.gsRemote;
       if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
