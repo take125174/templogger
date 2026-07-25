@@ -99,7 +99,13 @@
     <input id="calVal" placeholder="今の表示（例 30.1）" inputmode="decimal"
       style="flex:2;min-width:130px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:7px;padding:10px;font-family:var(--mono);font-size:14px">
     <button id="btnCal">この値で校正</button>
+    <button id="btnUncal">校正を解除</button>
   </div>
+  <div class="note">下のプレビューに緑の格子が出ます。<b>1マスに数字1つ</b>ずつ入るように、次の4本で合わせてから校正してください。</div>
+  <label class="ctl"><span>格子 左</span><input type="range" id="gL" min="0" max="900" value="20"><output id="gLV">2%</output></label>
+  <label class="ctl"><span>格子 右</span><input type="range" id="gR" min="100" max="1000" value="750"><output id="gRV">75%</output></label>
+  <label class="ctl"><span>格子 上</span><input type="range" id="gT" min="0" max="900" value="60"><output id="gTV">6%</output></label>
+  <label class="ctl"><span>格子 下</span><input type="range" id="gB" min="100" max="1000" value="960"><output id="gBV">96%</output></label>
   <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
@@ -196,6 +202,7 @@ const S = {
   fails: 0
 };
 const CHUNK = 360, FLUSH_EVERY = 30;
+const FAST_HINT = '1秒間隔は1日で約8万点になります。数時間ごとにCSVを保存しておくと安心です。';
 
 const $ = id => document.getElementById(id);
 const video = $('video'), overlay = $('overlay'), octx = overlay.getContext('2d');
@@ -696,40 +703,24 @@ function otsuOn(vals){          // 数値の並びを2群に分ける境界
 }
 
 // 校正：今のフレームから桁の枠を求め、等間隔のセルとして記録する
+// 格子（窓に対する割合）から各桁のセルを作る。窓が動いても割合は変わらない
+function gridCells(n){
+  const l=Number($('gL').value)/1000, r=Number($('gR').value)/1000;
+  const t=Number($('gT').value)/1000, b=Number($('gB').value)/1000;
+  const cw=(r-l)/n;
+  const cells=[];
+  for(let i=0;i<n;i++) cells.push({x0:l+i*cw, y0:t, w:cw, h:b-t});
+  return cells;
+}
+
+// 校正：格子の位置と、教えてもらった値から明るさの基準を学ぶ。二値化は使わない
 function calibrate(expected){
   const src=grabROI();
   if(!src) return {ok:false, why:'カメラが動いていません'};
-  const B=binarize(src);
-  const boxes=segmentDigits(B);
-  if(!boxes.length) return {ok:false, why:'数字が見つかりません。枠の中に数字が入っているか、下の二値化画像に数字が出ているか確認してください'};
-  const maxH=Math.max(...boxes.map(b=>b.h));
-  const digitBoxes=boxes.filter(b=>b.h>=maxH*0.75);
   const chars=expected.replace(/[^0-9]/g,'');
   if(!chars.length) return {ok:false, why:'数字を入力してください'};
-
-  let cells;
-  const y0=Math.min(...digitBoxes.map(b=>b.y0)), y1=Math.max(...digitBoxes.map(b=>b.y1));
-  if(digitBoxes.length===chars.length){
-    // 桁がきれいに分かれた場合は、その位置をそのまま使う
-    const wide=digitBoxes.filter(b=>b.w>=maxH*0.32).map(b=>b.w).sort((a,b)=>a-b);
-    const cellW=wide.length? wide[Math.floor(wide.length/2)] : digitBoxes[0].w;
-    cells=digitBoxes.map(b=>{
-      // 「1」は枠の右端に寄るので、右端を基準にセルを組み立てる
-      const x1 = b.w<cellW*0.6 ? b.x1+cellW*0.06 : b.x1;
-      const x0 = b.w<cellW*0.6 ? x1-cellW : b.x0;
-      return { x0:x0/B.w, y0:y0/B.h, w:(x1-x0)/B.w, h:(y1-y0)/B.h };
-    });
-  } else {
-    // 分かれ方が不完全でも、7セグは等間隔なので全体を桁数で等分する
-    const gx0=Math.min(...digitBoxes.map(b=>b.x0)), gx1=Math.max(...digitBoxes.map(b=>b.x1));
-    const span=gx1-gx0+1;
-    if(span < chars.length*4) return {ok:false, why:'数字の範囲が狭すぎます'};
-    const cw=span/chars.length;
-    cells=[];
-    for(let i=0;i<chars.length;i++)
-      cells.push({ x0:(gx0+i*cw)/B.w, y0:y0/B.h, w:cw/B.w, h:(y1-y0)/B.h });
-  }
-  // 教えてもらった値から、点灯・消灯それぞれの明るさを学習する
+  const cells=gridCells(chars.length);
+  if(cells[0].w*src.w < 6) return {ok:false, why:'格子が細すぎます。左右の幅を広げてください'};
   const on=[], off=[];
   cells.forEach((c,i)=>{
     const cell={x0:c.x0*src.w, y0:c.y0*src.h, w:c.w*src.w, h:c.h*src.h};
@@ -737,15 +728,18 @@ function calibrate(expected){
     if(!p) return;
     for(let k=0;k<7;k++) (p[k]==='1'?on:off).push(g[k]);
   });
-  if(!on.length || !off.length) return {ok:false, why:'明るさを学習できません'};
+  if(!on.length || !off.length)
+    return {ok:false, why:'全部同じ数字だと基準を学べません。数字がばらけているときに校正してください'};
   const mOn=on.reduce((a,b)=>a+b,0)/on.length, mOff=off.reduce((a,b)=>a+b,0)/off.length;
-  if(Math.abs(mOn-mOff) < 8) return {ok:false, why:'明暗の差が小さすぎます。照明を見直してください'};
-  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:expected.indexOf('.')>=0 ? expected.replace(/[^0-9.]/g,'').indexOf('.') : -1 };
+  if(Math.abs(mOn-mOff) < 6)
+    return {ok:false, why:'明暗の差が小さすぎます。格子が数字に合っているか、照明を確認してください'};
+  const dot=expected.replace(/[^0-9.]/g,'').indexOf('.');
+  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dot };
   saveMeta();
   return {ok:true, n:chars.length};
 }
 
-// 校正済みの読み取り。決まったセルを照合するだけなので速く安定する
+// 校正済みの読み取り。決まったセルの明るさを測るだけ。二値化なし
 function readCalibrated(){
   const src=grabROI();
   if(!src) return {ok:false, why:'カメラ待ち'};
@@ -777,19 +771,17 @@ function readCalibrated(){
     }
     const d=SEGMAP[bits];
     text += d || '?';
-    boxes.push({x0:Math.round(cell.x0), y0:Math.round(cell.y0),
-                w:Math.round(cell.w), h:Math.round(cell.h), kind:d||'?'});
+    boxes.push({x0:cell.x0, y0:cell.y0, w:cell.w, h:cell.h, kind:d||'?'});
   });
-  const B=binarize(src);
-  if(text.includes('?')) return {ok:false, why:'照合できない '+text, B, boxes};
-  if(worst < 4) return {ok:false, why:'明暗の差が小さい', B, boxes};
+  if(text.includes('?')) return {ok:false, why:'照合できない '+text, src, boxes};
+  if(worst < 3) return {ok:false, why:'明暗の差が小さい', src, boxes};
   let str=text;
   const mode=$('decimals').value;
   if(cal.dec>0) str=text.slice(0,cal.dec)+'.'+text.slice(cal.dec);
   else if(mode==='1' && text.length>1) str=text.slice(0,-1)+'.'+text.slice(-1);
   const v=parseFloat(str);
-  if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, B, boxes};
-  return {ok:true, value:v, str, B, boxes, text};
+  if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, src, boxes};
+  return {ok:true, value:v, str, src, boxes, text};
 }
 
 function readFrame(){
@@ -854,8 +846,41 @@ function burstRead(){
 
 /* ---------- デバッグ描画 ---------- */
 const raw=$('rawCanvas'), rctx=raw.getContext('2d');
+
+// 切り出し画像に格子を重ねて描く。1マスに数字1つが入っていれば正しい
+function drawGrid(src, cells, colour){
+  if(!src) return;
+  raw.width=src.w; raw.height=src.h;
+  if(src.raw) rctx.putImageData(src.raw,0,0);
+  if(!cells) return;
+  rctx.lineWidth=1;
+  cells.forEach(c=>{
+    const x=c.x0*src.w, y=c.y0*src.h, w=c.w*src.w, h=c.h*src.h;
+    rctx.strokeStyle=colour;
+    rctx.strokeRect(x+.5,y+.5,w-1,h-1);
+    // 中央の横線＝セグメントgの位置。数字の中央にくるのが目安
+    rctx.strokeStyle='rgba(255,255,255,.35)';
+    rctx.beginPath(); rctx.moveTo(x, y+h*0.5); rctx.lineTo(x+w, y+h*0.5); rctx.stroke();
+  });
+}
+
+// 格子合わせ用のプレビュー（校正前でも見られる）
+function previewGrid(){
+  const src=grabROI();
+  if(!src) return;
+  const n=($('calVal').value.replace(/[^0-9]/g,'').length)||3;
+  drawGrid(src, gridCells(n), '#33c76e');
+  dbg.width=1; dbg.height=1;
+  $('dbgInfo').textContent='格子を1マスに数字1つずつ合わせてください（'+n+'マス表示中）';
+}
+
 function paintDebug(r){
-  if(r && r.B){
+  if(r && r.src){
+    // 校正済み：切り出し画像に判定セルを重ねる
+    drawGrid(r.src, S.cal ? S.cal.cells : null, r.ok ? '#33c76e' : '#d9634a');
+    dbg.width=1; dbg.height=1;
+  } else if(r && r.B){
+    // 未校正の自動モード：二値化画像も見せる
     const {bin,w,h}=r.B;
     if(r.B.raw){ raw.width=w; raw.height=h; rctx.putImageData(r.B.raw,0,0); }
     dbg.width=w; dbg.height=h;
@@ -865,7 +890,7 @@ function paintDebug(r){
       im.data[i*4]=v; im.data[i*4+1]=bin[i]?230:200; im.data[i*4+2]=bin[i]?120:200; im.data[i*4+3]=255;
     }
     dctx.putImageData(im,0,0);
-    dctx.strokeStyle= S.cal ? '#33c76e' : '#e8b230'; dctx.lineWidth=1;
+    dctx.strokeStyle='#e8b230'; dctx.lineWidth=1;
     for(const b of (r.boxes||[])) dctx.strokeRect(b.x0+.5,b.y0+.5,b.w-1,b.h-1);
   }
   $('dbgVal').textContent = r && r.ok ? r.str+' °C' : '--';
@@ -920,12 +945,13 @@ function stop(){
   flush();
 }
 $('btnStart').onclick = ()=> S.running ? stop() : start();
-$('btnTest').onclick = ()=> paintDebug(burstRead());
+$('btnTest').onclick = ()=>{ if(S.cal) paintDebug(burstRead()); else previewGrid(); };
 function showCal(){
   $('calState').textContent = S.cal
     ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
     : '未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。';
 }
+$('btnUncal').onclick = ()=>{ S.cal=null; saveMeta(); showCal(); previewGrid(); };
 $('btnCal').onclick = ()=>{
   const v=$('calVal').value.trim();
   if(!v){ showAlert('今の表示の数字を入力してください（例 30.1）'); return; }
@@ -934,6 +960,7 @@ $('btnCal').onclick = ()=>{
   if(!r.ok){ showAlert('校正できません：'+r.why); showCal(); return; }
   $('alert').style.display='none';
   showCal();
+  S.last=null; S.pending=null;
   paintDebug(burstRead());
 };
 $('btnFit').onclick = ()=>{
@@ -952,7 +979,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -969,6 +996,7 @@ async function load(){
     const m=await window.storage.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
+      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
       if(o.thOff)$('thOff').value=o.thOff;
@@ -1056,8 +1084,32 @@ $('btnClear').onclick=async ()=>{
 };
 
 /* ---------- 設定UI ---------- */
-function syncLabels(){ $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; }
+function gridLabels(){
+  for(const id of ['gL','gR','gT','gB']) $(id+'V').textContent=(Number($(id).value)/10).toFixed(0)+'%';
+}
+function syncLabels(){
+  $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; gridLabels();
+}
+let gridTimer=null;
+for(const id of ['gL','gR','gT','gB']){
+  $(id).addEventListener('input', ()=>{
+    // 左右・上下が逆転しないようにする
+    if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
+    if(Number($('gT').value) >= Number($('gB').value)-50) $('gT').value = Number($('gB').value)-50;
+    gridLabels();
+    clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid, 60);
+  });
+  $(id).addEventListener('change', saveMeta);
+}
+$('calVal').addEventListener('input', ()=>{ clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid,120); });
 for(const id of ['thOff','segTh']) $(id).addEventListener('input', ()=>{ syncLabels(); });
+$('interval').addEventListener('change', ()=>{
+  const v=Number($('interval').value);
+  $('calState').textContent = v<=2
+    ? FAST_HINT
+    : (S.cal ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
+             : '未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。');
+});
 for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventListener('change', ()=>{
   saveMeta();
   if(S.running){ clearInterval(S.timer); S.timer=setInterval(tick, Number($('interval').value)*1000); }
@@ -1065,6 +1117,7 @@ for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventL
 syncLabels();
 roiToSliders();
 showCal();
+setTimeout(previewGrid, 1200);
 $('btnCam').onclick = initCamera;
 $('mode').addEventListener('change', ()=>{ found=null; drawOverlay(); saveMeta(); });
 setInterval(()=>{ if($('mode').value==='auto' && video.videoWidth) drawOverlay(); }, 500);
