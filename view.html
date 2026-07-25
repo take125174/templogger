@@ -88,6 +88,8 @@
   </div>
   <div class="lbl" style="margin-top:12px">記録が止まったとみなす時間（分・0で無効）</div>
   <input id="deadMin" inputmode="numeric" placeholder="5">
+  <div class="lbl" style="margin-top:12px">画面の更新間隔（秒）</div>
+  <input id="pollSec" inputmode="numeric" placeholder="5">
   <button id="notify">通知を許可する</button>
   <button class="go" id="saveSet">保存</button>
 </div>
@@ -121,7 +123,7 @@
 const $ = id => document.getElementById(id);
 const K_URL='templogger:viewUrl', K_SET='templogger:alerts';
 
-let cfg = { hi:null, lo:null, deadMin:5 };
+let cfg = { hi:null, lo:null, deadMin:5, pollSec:5 };
 try{ Object.assign(cfg, JSON.parse(localStorage.getItem(K_SET)||'{}')); }catch(e){}
 
 function endpoint(){
@@ -343,6 +345,7 @@ function renderTable(d){
 
 /* ---------- 取得 ---------- */
 async function load(){
+  if(document.hidden) return;          // 見ていない間は通信しない
   const url=endpoint();
   if(!url){ $('setup').style.display='block'; return; }
   $('setup').style.display='none';
@@ -387,12 +390,15 @@ $('openSet').onclick=e=>{
   $('hi').value = cfg.hi===null?'':cfg.hi;
   $('lo').value = cfg.lo===null?'':cfg.lo;
   $('deadMin').value = cfg.deadMin;
+  $('pollSec').value = cfg.pollSec;
   $('settings').style.display = $('settings').style.display==='block' ? 'none' : 'block';
 };
 $('saveSet').onclick=()=>{
   const num=v=>{ const t=parseFloat(v); return isFinite(t)?t:null; };
   cfg.hi=num($('hi').value); cfg.lo=num($('lo').value);
   const dm=parseFloat($('deadMin').value); cfg.deadMin=isFinite(dm)?dm:0;
+  const ps=parseFloat($('pollSec').value); cfg.pollSec=isFinite(ps)&&ps>=2?ps:5;
+  restartPoll();
   localStorage.setItem(K_SET, JSON.stringify(cfg));
   $('settings').style.display='none';
   lastState=''; load();
@@ -504,8 +510,13 @@ $('sendCal').onclick=()=>{
   sendCmd({type:'calibrate', value:v});
 };
 
+let pollTimer=null;
+function restartPoll(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer=setInterval(load, Math.max(2, cfg.pollSec||5)*1000);
+}
 load();
-setInterval(load,5000);
+restartPoll();
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
 window.addEventListener('resize',()=>{ tableKey=''; load(); });
 </script>
