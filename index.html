@@ -198,6 +198,14 @@
     <button id="gsOpen">表示ページを開く</button>
     <button id="gsReset" class="stop">シートをリセット</button>
   </div>
+  <label class="ctl"><span>送信間隔</span>
+    <select id="gsEvery">
+      <option value="5">5秒</option>
+      <option value="10" selected>10秒</option>
+      <option value="30">30秒</option>
+      <option value="60">60秒</option>
+    </select>
+  </label>
   <div class="note" id="gsState">未設定。設定すると記録が自動で送られ、このURLを他の端末で開くと今の気温が見られます。</div>
 </div>
 
@@ -1172,7 +1180,8 @@ function gsShow(msg){ $('gsState').textContent=msg; }
 async function gsFlush(force){
   const url=gsUrl();
   if(!url || gsSending || !gsQueue.length) return;
-  if(!force && gsQueue.length<10 && Date.now()-(gsLastOk||0) < 60000) return;
+  const everyMs = Number(($('gsEvery')||{value:10}).value)*1000;
+  if(!force && Date.now()-(gsLastOk||0) < everyMs) return;
   gsSending=true;
   const batch=gsQueue.slice(0, 200);
   try{
@@ -1195,7 +1204,7 @@ async function gsFlush(force){
     gsFails++; gsShow('送信できません（'+gsFails+'回）。URLと公開設定を確認してください。待ち '+gsQueue.length+'件');
   } finally { gsSending=false; }
 }
-setInterval(()=>gsFlush(false), 20000);
+setInterval(()=>gsFlush(false), 2000);
 
 $('gsTest').onclick = async ()=>{
   const url=gsUrl();
@@ -1230,6 +1239,7 @@ $('gsReset').onclick = async ()=>{
   }catch(e){ gsShow('リセットに失敗しました。URLと公開設定を確認してください'); }
 };
 $('gsUrl').addEventListener('change', saveMeta);
+$('gsEvery').addEventListener('change', saveMeta);
 
 /* ---------- 記録ループ ---------- */
 let wakeLock=null;
@@ -1350,7 +1360,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1368,6 +1378,7 @@ async function load(){
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
       if(o.gsUrl) $('gsUrl').value=o.gsUrl;
+      if(o.gsEvery) $('gsEvery').value=o.gsEvery;
       if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
