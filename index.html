@@ -208,10 +208,8 @@
   </label>
   <label class="ctl"><span>遠隔操作</span>
     <select id="gsRemote">
-      <option value="0">使わない</option>
-      <option value="30" selected>画像を30秒ごとに送る</option>
-      <option value="10">画像を10秒ごとに送る</option>
-      <option value="120">画像を2分ごとに送る</option>
+      <option value="1" selected>受け付ける（要求時のみ画像送信）</option>
+      <option value="0">受け付けない</option>
     </select>
   </label>
   <div class="note" id="gsState">未設定。設定すると記録が自動で送られ、このURLを他の端末で開くと今の気温が見られます。</div>
@@ -1253,7 +1251,7 @@ $('gsRemote').addEventListener('change', saveMeta);
 
 /* ---------- 遠隔操作 ----------
    カメラ画像を定期的に送り、閲覧ページからの校正指示を受け取る */
-let snapLast=0, cmdLast=0, remoteBusy=false;
+let cmdLast=0, remoteBusy=false;
 
 function snapshotDataUrl(){
   const src=grabROI();
@@ -1278,35 +1276,31 @@ function snapshotDataUrl(){
 
 async function remoteTick(){
   const url=gsUrl();
-  const every=Number($('gsRemote').value||0);
-  if(!url || !every || remoteBusy) return;
+  if(!url || $('gsRemote').value!=='1' || remoteBusy) return;
   const now=Date.now();
-
-  // 画像を送る
-  if(now-snapLast > every*1000){
-    const img=snapshotDataUrl();
-    if(img){
-      remoteBusy=true;
-      try{
-        await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-          body: JSON.stringify({snapshot:img, cal: S.cal? {n:S.cal.n, dec:S.cal.dec} : null})});
-        snapLast=now;
-      }catch(e){}
-      remoteBusy=false;
-    } else snapLast=now;
-  }
-
-  // 指示を確認する
-  if(now-cmdLast > 8000){
-    cmdLast=now;
-    try{
-      const r=await fetch(url+(url.includes('?')?'&':'?')+'what=cmd&_='+now);
-      const d=await r.json();
-      if(d && d.ok && d.cmd) await runCommand(d.cmd, url);
-    }catch(e){}
-  }
+  if(now-cmdLast < 3000) return;      // 3秒ごとに指示を確認する
+  cmdLast=now;
+  try{
+    const r=await fetch(url+(url.includes('?')?'&':'?')+'what=cmd&_='+now);
+    const d=await r.json();
+    if(d && d.ok && d.cmd) await runCommand(d.cmd, url);
+  }catch(e){}
 }
-setInterval(remoteTick, 3000);
+setInterval(remoteTick, 1500);
+
+// 要求されたときだけ、その瞬間の画像を送る
+async function sendSnapshot(url){
+  const img=snapshotDataUrl();
+  if(!img) return {ok:false,msg:'カメラが動いていません'};
+  remoteBusy=true;
+  try{
+    await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({snapshot:img})});
+    return {ok:true,msg:'画像を送りました'};
+  }catch(e){
+    return {ok:false,msg:'画像を送れませんでした'};
+  } finally { remoteBusy=false; }
+}
 
 async function runCommand(cmd, url){
   let result={ok:false, msg:'不明な指示'};
@@ -1327,11 +1321,11 @@ async function runCommand(cmd, url){
           const t=burstRead(); paintDebug(t);
           result={ok:true, msg:'校正しました（一致度 '+before.toFixed(2)+'→'+fit.score.toFixed(2)+'）'
             + (t.ok? ' 読み取り '+t.str+'°C' : ' 読み取り: '+t.why)};
+          await sendSnapshot(url);       // 校正後の格子を確認できるよう送り直す
         } else result={ok:false,msg:'校正に失敗: '+c.why};
       }
     } else if(cmd.type==='snapshot'){
-      snapLast=0;                       // 次の巡回ですぐ送る
-      result={ok:true,msg:'画像を送ります'};
+      result=await sendSnapshot(url);
     }
   }catch(e){ result={ok:false,msg:String(e)}; }
   try{
