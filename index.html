@@ -108,6 +108,7 @@
   <label class="ctl"><span>格子 下</span><input type="range" id="gB" min="100" max="1000" value="960"><output id="gBV">96%</output></label>
   <label class="ctl"><span>格子 回転</span><input type="range" id="gS" min="-200" max="200" value="0"><output id="gSV">0°</output></label>
   <label class="ctl"><span>桁の幅</span><input type="range" id="gW" min="40" max="100" value="100"><output id="gWV">100%</output></label>
+  <label class="ctl"><span>小数点の幅</span><input type="range" id="gD" min="0" max="60" value="0"><output id="gDV">0%</output></label>
   <div class="note" id="calState">未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。</div>
 </div>
 
@@ -793,16 +794,32 @@ function otsuOn(vals){
 
 // 校正：今のフレームから桁の枠を求め、等間隔のセルとして記録する
 // 格子（窓に対する割合）から各桁のセルを作る。窓が動いても割合は変わらない
-function gridCells(n){
+// dec = 小数点より前の桁数。そこに小数点ぶんの隙間を入れる
+function gridCells(n, dec){
   const l=Number($('gL').value)/1000, r=Number($('gR').value)/1000;
   const t=Number($('gT').value)/1000, b=Number($('gB').value)/1000;
   const frac=Number($('gW').value)/100;      // 桁の幅（間隔に対する割合）
-  const pitch=(r-l)/n;
-  const cw=pitch*frac;
-  const pad=(pitch-cw)/2;
-  const cells=[];
-  for(let i=0;i<n;i++) cells.push({x0:l+i*pitch+pad, y0:t, w:cw, h:b-t});
+  const dotF=Number($('gD').value)/100;      // 小数点の幅（間隔に対する割合）
+  if(dec===undefined) dec=dotPos();
+  const hasDot = dec>0 && dec<n;
+  // 全体の幅 = n個の桁 + 小数点ぶん
+  const pitch=(r-l)/(n + (hasDot?dotF:0));
+  const gap=pitch*dotF;
+  const cw=pitch*frac, pad=(pitch-cw)/2;
+  const cells=[]; let x=l;
+  for(let i=0;i<n;i++){
+    if(hasDot && i===dec) x+=gap;            // ここに小数点が入る
+    cells.push({x0:x+pad, y0:t, w:cw, h:b-t});
+    x+=pitch;
+  }
   return cells;
+}
+// 入力欄から「小数点より前の桁数」を得る
+function dotPos(){
+  if(S.cal && S.cal.dec!==undefined) return S.cal.dec;
+  const v=$('calVal').value.replace(/[^0-9.]/g,'');
+  const i=v.indexOf('.');
+  return i<0 ? -1 : i;
 }
 
 // 校正：格子の位置と、教えてもらった値から明るさの基準を学ぶ。二値化は使わない
@@ -811,7 +828,8 @@ function calibrate(expected){
   if(!src) return {ok:false, why:'カメラが動いていません'};
   const chars=expected.replace(/[^0-9]/g,'');
   if(!chars.length) return {ok:false, why:'数字を入力してください'};
-  const cells=gridCells(chars.length);
+  const dotAt=expected.replace(/[^0-9.]/g,'').indexOf('.');
+  const cells=gridCells(chars.length, dotAt);
   if(cells[0].w*src.w < 6) return {ok:false, why:'格子が細すぎます。左右の幅を広げてください'};
   const centre={ x:(cells[0].x0 + cells[cells.length-1].x0 + cells[0].w)/2*src.w,
                  y:(cells[0].y0 + cells[0].h/2)*src.h };
@@ -827,8 +845,7 @@ function calibrate(expected){
   const mOn=on.reduce((a,b)=>a+b,0)/on.length, mOff=off.reduce((a,b)=>a+b,0)/off.length;
   if(Math.abs(mOn-mOff) < 6)
     return {ok:false, why:'明暗の差が小さすぎます。格子が数字に合っているか、照明を確認してください'};
-  const dot=expected.replace(/[^0-9.]/g,'').indexOf('.');
-  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dot, slant:Number($('gS').value)/10 };
+  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dotAt, slant:Number($('gS').value)/10 };
   saveMeta();
   return {ok:true, n:chars.length};
 }
@@ -1090,7 +1107,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await window.storage.set('tmeta', JSON.stringify({cal:S.cal, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1107,7 +1124,7 @@ async function load(){
     const m=await window.storage.get('tmeta', false);
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
-      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; }
+      if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
       if(o.thOff)$('thOff').value=o.thOff;
@@ -1199,12 +1216,13 @@ function gridLabels(){
   for(const id of ['gL','gR','gT','gB']) $(id+'V').textContent=(Number($(id).value)/10).toFixed(0)+'%';
   $('gSV').textContent=(Number($('gS').value)/10).toFixed(1)+'°';
   $('gWV').textContent=$('gW').value+'%';
+  $('gDV').textContent=$('gD').value+'%';
 }
 function syncLabels(){
   $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; gridLabels();
 }
 let gridTimer=null;
-for(const id of ['gL','gR','gT','gB','gS','gW']){
+for(const id of ['gL','gR','gT','gB','gS','gW','gD']){
   $(id).addEventListener('input', ()=>{
     // 左右・上下が逆転しないようにする
     if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
