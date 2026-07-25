@@ -124,6 +124,7 @@
   <div class="row">
     <button id="btnCam">カメラを開始</button>
   </div>
+  <label class="ctl" id="zoomRow" style="display:none"><span>ズーム</span><input type="range" id="zoom" min="100" max="400" value="100"><output id="zoomV">1.0x</output></label>
   <div class="note">枠を数字「30.1」だけにぴったり合わせます（°Cは入れない）。枠の中をドラッグで移動、右下の角でサイズ変更。細かい調整は下のスライダーで。</div>
   <label class="ctl"><span>左位置</span><input type="range" id="roiX" min="0" max="1000" value="250"><output id="roiXV">25.0%</output></label>
   <label class="ctl"><span>上位置</span><input type="range" id="roiY" min="0" max="1000" value="400"><output id="roiYV">40.0%</output></label>
@@ -225,12 +226,45 @@ async function initCamera(){
     await video.play();
     $('alert').style.display='none';
     $('btnCam').textContent='カメラを開き直す';
+    setupZoom(stream);
     drawOverlay();
   }catch(e){
     showAlert('カメラを開けません（' + e.name + '）。「カメラを開始」をもう一度押すか、Safariの設定でこのサイトのカメラを「許可」にしてください。');
   }
 }
 document.addEventListener('DOMContentLoaded', ()=>{});
+
+/* ---------- ズーム ---------- */
+let zoomTrack=null;
+function setupZoom(stream){
+  const row=$('zoomRow');
+  try{
+    const tr=stream.getVideoTracks()[0];
+    const caps = tr.getCapabilities ? tr.getCapabilities() : {};
+    if(caps && caps.zoom){
+      zoomTrack=tr;
+      const min=caps.zoom.min||1, max=Math.min(caps.zoom.max||1, (caps.zoom.min||1)*6);
+      const step=caps.zoom.step||0.1;
+      const z=$('zoom');
+      z.min=Math.round(min*100); z.max=Math.round(max*100);
+      z.step=Math.max(1, Math.round(step*100));
+      const cur=(tr.getSettings && tr.getSettings().zoom) || min;
+      z.value=Math.round(cur*100);
+      $('zoomV').textContent=(z.value/100).toFixed(1)+'x';
+      row.style.display='';
+      return;
+    }
+  }catch(e){}
+  zoomTrack=null; row.style.display='none';
+}
+if($('zoom')) $('zoom').addEventListener('input', ()=>{
+  const v=Number($('zoom').value)/100;
+  $('zoomV').textContent=v.toFixed(1)+'x';
+  if(!zoomTrack) return;
+  zoomTrack.applyConstraints({advanced:[{zoom:v}]}).catch(()=>{});
+  // ズームすると画角が変わるので、追従をやり直す
+  if(typeof resetTracking==='function') resetTracking();
+});
 
 /* ---------- ROI 操作 ---------- */
 function fitOverlay(){
@@ -254,6 +288,23 @@ function drawOverlay(){
   octx.strokeStyle = auto ? '#e8b230' : '#33c76e';
   octx.lineWidth=2; octx.strokeRect(x,y,w,h);
   if(!auto){ octx.fillStyle='#33c76e'; octx.fillRect(x+w-16,y+h-16,16,16); }
+
+  // 桁の格子をカメラ映像に重ねる。ここを見ながら合わせられる
+  if(typeof effectiveRect==='function' && $('gL')){
+    const E=effectiveRect();
+    const ex=E.x*W, ey=E.y*H, ew=E.w*W, eh=E.h*H;
+    const n=(S.cal ? S.cal.n : ($('calVal').value.replace(/[^0-9]/g,'').length||3));
+    const cells = S.cal ? S.cal.cells : gridCells(n);
+    octx.lineWidth=2;
+    cells.forEach(c=>{
+      const cx=ex+c.x0*ew, cy=ey+c.y0*eh, cw=c.w*ew, ch=c.h*eh;
+      octx.strokeStyle = S.cal ? 'rgba(51,199,110,.95)' : 'rgba(51,199,110,.8)';
+      octx.strokeRect(cx,cy,cw,ch);
+      octx.strokeStyle='rgba(255,255,255,.45)'; octx.lineWidth=1;
+      octx.beginPath(); octx.moveTo(cx,cy+ch*0.5); octx.lineTo(cx+cw,cy+ch*0.5); octx.stroke();
+      octx.lineWidth=2;
+    });
+  }
   requestAnimationFrame(()=>{});
 }
 window.addEventListener('resize', drawOverlay);
@@ -454,15 +505,22 @@ function currentRect(){
 // 手動で追従をやり直したいとき用
 function resetTracking(){ found=null; foundAt=0; }
 
-function grabROI(){
-  const vw = video.videoWidth, vh = video.videoHeight;
-  if(!vw) return null;
+// 実際に切り出す範囲（自動モードでは白い縁の内側まで詰める）
+function effectiveRect(){
   const R = currentRect();
   let rx=R.x, ry=R.y, rw=R.w, rh=R.h;
-  if($('mode').value==='auto'){        // 白い縁の内側まで少し詰める
+  if($('mode').value==='auto'){
     const ix=rw*0.06, iy=rh*0.10;
     rx+=ix; ry+=iy; rw-=ix*2; rh-=iy*2;
   }
+  return {x:rx, y:ry, w:rw, h:rh};
+}
+
+function grabROI(){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if(!vw) return null;
+  const E = effectiveRect();
+  const rx=E.x, ry=E.y, rw=E.w, rh=E.h;
   const sx=Math.round(rx*vw), sy=Math.round(ry*vh);
   const sw=Math.max(8,Math.round(rw*vw)), sh=Math.max(8,Math.round(rh*vh));
   // 高さを基準に拡大する。横長の枠でも数字の解像度が落ちない
@@ -1097,11 +1155,15 @@ for(const id of ['gL','gR','gT','gB']){
     if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
     if(Number($('gT').value) >= Number($('gB').value)-50) $('gT').value = Number($('gB').value)-50;
     gridLabels();
+    drawOverlay();
     clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid, 60);
   });
   $(id).addEventListener('change', saveMeta);
 }
-$('calVal').addEventListener('input', ()=>{ clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid,120); });
+$('calVal').addEventListener('input', ()=>{
+  drawOverlay();
+  clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid,120);
+});
 for(const id of ['thOff','segTh']) $(id).addEventListener('input', ()=>{ syncLabels(); });
 $('interval').addEventListener('change', ()=>{
   const v=Number($('interval').value);
