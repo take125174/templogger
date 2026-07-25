@@ -185,15 +185,17 @@ function niceStep(range, target){
   const n=raw/mag;
   return (n<=1?1:n<=2?2:n<=5?5:10)*mag;
 }
+let chartMap=null, chartPts=[], hoverIdx=null;
 function drawChart(d){
   const pts=(d.minutes||[]).slice().reverse();
+  chartPts=pts;
   const cv=$('chart'), ctx=cv.getContext('2d');
   const dpr=window.devicePixelRatio||1;
   const W=cv.clientWidth, H=150;
   cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,W,H);
-  if(pts.length<2){ return; }
+  if(pts.length<2){ chartMap=null; return; }
 
   let mn=Math.min(...pts.map(p=>p.min)), mx=Math.max(...pts.map(p=>p.max));
   if(cfg.hi!==null && cfg.hi<=mx+3) mx=Math.max(mx,cfg.hi);
@@ -206,6 +208,7 @@ function drawChart(d){
   const padL=34,padR=6,padT=8,padB=16;
   const X=i=>padL+(W-padL-padR)*(i/(pts.length-1));
   const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
+  chartMap={X,Y,lo,hi,padL,padR,padT,padB,W,H,n:pts.length};
 
   ctx.font='9px monospace'; ctx.textBaseline='middle';
   for(let v=lo; v<=hi+step*1e-6; v+=step){
@@ -243,7 +246,65 @@ function drawChart(d){
   ctx.fillStyle='#7e8d86'; ctx.font='9px monospace';
   ctx.fillText(pts[0].label,padL,H-4);
   ctx.fillText(last.label, W-padR-ctx.measureText(last.label).width, H-4);
+
+  // 触っている位置の値を出す
+  if(hoverIdx!==null && hoverIdx>=0 && hoverIdx<pts.length){
+    const p=pts[hoverIdx], hx=X(hoverIdx), hy=Y(p.avg);
+    ctx.strokeStyle='rgba(232,178,48,.85)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,H-padB); ctx.stroke();
+    ctx.fillStyle='#e8b230';
+    ctx.beginPath(); ctx.arc(hx,hy,4,0,Math.PI*2); ctx.fill();
+
+    const l1=p.label+'  '+fmt(p.avg)+'\u00b0C';
+    const l2='最高 '+fmt(p.max)+'  最低 '+fmt(p.min);
+    ctx.font='11px ui-monospace,monospace';
+    const bw=Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width)+12;
+    const bh=34;
+    let bx=Math.max(padL, Math.min(W-padR-bw, hx-bw/2));
+    let by=padT;
+    if(hy<padT+bh+8) by=H-padB-bh;          // 点と重ならないよう避ける
+    ctx.fillStyle='rgba(11,15,13,.94)';
+    ctx.fillRect(bx,by,bw,bh);
+    ctx.strokeStyle='#2b3733'; ctx.lineWidth=1;
+    ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
+    ctx.textBaseline='middle';
+    ctx.fillStyle='#dfe6e1'; ctx.fillText(l1, bx+6, by+11);
+    ctx.fillStyle='#7e8d86'; ctx.fillText(l2, bx+6, by+25);
+    ctx.textBaseline='alphabetic';
+    ctx.font='9px monospace';
+  }
 }
+
+/* ---------- グラフを触って値を見る ---------- */
+function pickAt(clientX){
+  if(!chartMap || chartPts.length<2) return;
+  const cv=$('chart'), r=cv.getBoundingClientRect();
+  const x=clientX-r.left;
+  const {padL,padR,W,n}=chartMap;
+  const frac=(x-padL)/Math.max(1,(W-padL-padR));
+  hoverIdx=Math.round(Math.min(1,Math.max(0,frac))*(n-1));
+  redrawHover();
+}
+let lastData=null;
+function redrawHover(){ if(lastData) drawChart(lastData); }
+function clearHover(){ if(hoverIdx!==null){ hoverIdx=null; redrawHover(); } }
+
+(function(){
+  const cv=$('chart');
+  cv.style.touchAction='none';
+  cv.addEventListener('pointerdown', e=>{
+    e.stopPropagation();
+    cv.setPointerCapture(e.pointerId);
+    pickAt(e.clientX);
+  });
+  cv.addEventListener('pointermove', e=>{
+    if(e.buttons || e.pressure>0){ e.stopPropagation(); pickAt(e.clientX); }
+  });
+  // グラフ以外を触ったら消す
+  document.addEventListener('pointerdown', e=>{
+    if(e.target !== cv) clearHover();
+  });
+})();
 
 /* ---------- 表 ---------- */
 let tableKey='';
@@ -282,8 +343,16 @@ async function load(){
       return;
     }
     $('app').innerHTML='';
+    lastData=d;
     const state=checkAlert(d);
     renderHead(d,state);
+    // 表示中の分が増えたら選択位置をずらして、同じ時刻を指し続ける
+    if(hoverIdx!==null && chartPts.length){
+      const prev=chartPts[hoverIdx] ? chartPts[hoverIdx].label : null;
+      const next=(d.minutes||[]).slice().reverse();
+      const found=prev ? next.findIndex(m=>m.label===prev) : -1;
+      hoverIdx = found>=0 ? found : null;
+    }
     drawChart(d);
     renderTable(d);
   }catch(e){
