@@ -195,6 +195,7 @@
     <button id="gsTest">接続テスト</button>
     <button id="gsSend">今すぐ送信</button>
     <button id="gsOpen">表示ページを開く</button>
+    <button id="gsReset" class="stop">シートをリセット</button>
   </div>
   <div class="note" id="gsState">未設定。設定すると記録が自動で送られ、このURLを他の端末で開くと今の気温が見られます。</div>
 </div>
@@ -854,7 +855,7 @@ function gridCells(n, dec){
 }
 // 入力欄から「小数点より前の桁数」を得る
 function dotPos(){
-  if(S.cal && S.cal.dec!==undefined) return S.cal.dec;
+  if(S.cal && S.cal.dec!==undefined && S.cal.dec>0) return S.cal.dec;
   const v=$('calVal').value.replace(/[^0-9.]/g,'');
   const i=v.indexOf('.');
   return i<0 ? -1 : i;
@@ -1119,6 +1120,20 @@ $('gsSend').onclick = ()=>{
   gsFlush(true);
 };
 $('gsOpen').onclick = ()=>{ const u=gsUrl(); if(u) window.open(u,'_blank'); };
+$('gsReset').onclick = async ()=>{
+  const url=gsUrl();
+  if(!url){ gsShow('URLを入れてください'); return; }
+  const key=prompt('合言葉（Apps Scriptの RESET_KEY）を入れてください。\n今のログは別シートに退避され、新しく記録を始めます。');
+  if(!key) return;
+  if(!confirm('本当にリセットしますか？\nスプレッドシートのログが別シートに移ります。')) return;
+  gsShow('リセット中…');
+  try{
+    const r=await fetch(url+(url.includes('?')?'&':'?')+'reset='+encodeURIComponent(key));
+    const d=await r.json();
+    if(d.ok) gsShow('リセットしました（退避先: '+(d.sheet||'—')+'）');
+    else gsShow('リセットできません：合言葉が違います');
+  }catch(e){ gsShow('リセットに失敗しました。URLと公開設定を確認してください'); }
+};
 $('gsUrl').addEventListener('change', saveMeta);
 
 /* ---------- 記録ループ ---------- */
@@ -1397,14 +1412,23 @@ function syncLabels(){
   $('thOffV').textContent=$('thOff').value; $('segThV').textContent=$('segTh').value+'%'; gridLabels();
 }
 let gridTimer=null;
+// 校正後でも格子を動かせるようにする。学習した明るさの基準は保つ
+function applyGridToCal(){
+  if(!S.cal) return;
+  S.cal.cells = gridCells(S.cal.n, S.cal.dec);
+  S.cal.slant = Number($('gS').value)/10;
+}
 for(const id of ['gL','gR','gT','gB','gS','gW','gD']){
   $(id).addEventListener('input', ()=>{
     // 左右・上下が逆転しないようにする
     if(Number($('gL').value) >= Number($('gR').value)-50) $('gL').value = Number($('gR').value)-50;
     if(Number($('gT').value) >= Number($('gB').value)-50) $('gT').value = Number($('gB').value)-50;
     gridLabels();
+    applyGridToCal();
     drawOverlay();
-    clearTimeout(gridTimer); gridTimer=setTimeout(previewGrid, 60);
+    clearTimeout(gridTimer); gridTimer=setTimeout(()=>{
+      if(S.cal) paintDebug(readFrame()); else previewGrid();
+    }, 60);
   });
   $(id).addEventListener('change', saveMeta);
 }
