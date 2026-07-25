@@ -1178,7 +1178,16 @@ function paintDebug(r){
 /* ---------- スプレッドシートへの送信 ----------
    Apps Script は事前確認(preflight)に対応しないので、
    Content-Type を text/plain にして「単純なリクエスト」にする */
-let gsQueue=[], gsSending=false, gsLastOk=null, gsFails=0;
+let gsQueue=[], gsSending=false, gsLastOk=null, gsFails=0, gsSendStart=0;
+
+// 応答が返らないまま固まるのを防ぐ。時間切れで必ず抜ける
+function fetchTimeout(url, opts, ms){
+  const ac = (typeof AbortController!=='undefined') ? new AbortController() : null;
+  const o = Object.assign({}, opts||{});
+  if(ac) o.signal = ac.signal;
+  const timer = setTimeout(()=>{ if(ac) ac.abort(); }, ms||20000);
+  return fetch(url, o).finally(()=>clearTimeout(timer));
+}
 
 function gsUrl(){ return ($('gsUrl').value||'').trim(); }
 function gsShow(msg){ $('gsState').textContent=msg; }
@@ -1188,14 +1197,14 @@ async function gsFlush(force){
   if(!url || gsSending || !gsQueue.length) return;
   const everyMs = Number(($('gsEvery')||{value:10}).value)*1000;
   if(!force && Date.now()-(gsLastOk||0) < everyMs) return;
-  gsSending=true;
+  gsSending=true; gsSendStart=Date.now();
   const batch=gsQueue.slice(0, 200);
   try{
-    const res=await fetch(url,{
+    const res=await fetchTimeout(url,{
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify({rows: batch.map(p=>[new Date(p[0]).toISOString(), p[1]])})
-    });
+    }, 20000);
     const txt=await res.text();
     let ok=false;
     try{ ok=JSON.parse(txt).ok===true; }catch(e){ ok=res.ok; }
@@ -1211,6 +1220,24 @@ async function gsFlush(force){
   } finally { gsSending=false; }
 }
 setInterval(()=>gsFlush(false), 2000);
+
+// 見張り：送信が固まっていたら解除して、次の巡回で送り直す
+setInterval(()=>{
+  if(gsSending && Date.now()-gsSendStart > 45000){
+    gsSending=false;
+    gsFails++;
+    gsShow('送信が応答しないため中断しました（'+gsFails+'回）。待ち '+gsQueue.length+'件');
+  }
+  // 送れていない状態が続いていたら知らせる
+  if(gsUrl() && gsQueue.length>0 && gsLastOk && Date.now()-gsLastOk > 180000){
+    gsShow('3分以上送信できていません。待ち '+gsQueue.length+'件。通信状態を確認してください。');
+  }
+}, 5000);
+
+// 画面に戻ったときは、溜まったぶんをすぐ送る
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden){ gsSending=false; gsFlush(true); }
+});
 
 $('gsTest').onclick = async ()=>{
   const url=gsUrl();
@@ -1276,12 +1303,12 @@ function snapshotDataUrl(){
 
 async function remoteTick(){
   const url=gsUrl();
-  if(!url || $('gsRemote').value!=='1' || remoteBusy) return;
+  if(!url || $('gsRemote').value!=='1' || remoteBusy || gsSending) return;
   const now=Date.now();
   if(now-cmdLast < 3000) return;      // 3秒ごとに指示を確認する
   cmdLast=now;
   try{
-    const r=await fetch(url+(url.includes('?')?'&':'?')+'what=cmd&_='+now);
+    const r=await fetchTimeout(url+(url.includes('?')?'&':'?')+'what=cmd&_='+now, {}, 15000);
     const d=await r.json();
     if(d && d.ok && d.cmd) await runCommand(d.cmd, url);
   }catch(e){}
@@ -1294,8 +1321,8 @@ async function sendSnapshot(url){
   if(!img) return {ok:false,msg:'カメラが動いていません'};
   remoteBusy=true;
   try{
-    await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({snapshot:img})});
+    await fetchTimeout(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({snapshot:img})}, 30000);
     return {ok:true,msg:'画像を送りました'};
   }catch(e){
     return {ok:false,msg:'画像を送れませんでした'};
@@ -1312,25 +1339,46 @@ async function runCommand(cmd, url){
       if(!src) result={ok:false,msg:'カメラが動いていません'};
       else if(!chars.length) result={ok:false,msg:'数字がありません'};
       else{
-        const before=gridScore(src,gridParams(),chars,dec);
-        const fit=refineGrid(src,chars,dec,gridParams());
+        // 失敗したときに戻せるよう、今の状態を控えておく
+        const prevCal = S.cal ? JSON.parse(JSON.stringify(S.cal)) : null;
+        const prevGrid = gridParams();
+        const restore = ()=>{ S.cal=prevCal; setGridParams(prevGrid); drawOverlay(); saveMeta(); };
+
+        const before=gridScore(src,prevGrid,chars,dec);
+        const fit=refineGrid(src,chars,dec,prevGrid);
         if(fit.score>before){ setGridParams(fit.p); applyGridToCal(); drawOverlay(); }
         const c=calibrate(String(cmd.value));
-        if(c.ok){
-          S.last=null; S.pending=null; showCal();
-          const t=burstRead(); paintDebug(t);
-          result={ok:true, msg:'校正しました（一致度 '+before.toFixed(2)+'→'+fit.score.toFixed(2)+'）'
-            + (t.ok? ' 読み取り '+t.str+'°C' : ' 読み取り: '+t.why)};
-          await sendSnapshot(url);       // 校正後の格子を確認できるよう送り直す
-        } else result={ok:false,msg:'校正に失敗: '+c.why};
+        if(!c.ok){
+          restore();
+          result={ok:false,msg:'校正に失敗（元の設定に戻しました）: '+c.why};
+        } else {
+          S.last=null; S.pending=null;
+          // 実際に読めるか確かめる。読めなければ元に戻す
+          let good=0, why='';
+          for(let i=0;i<3;i++){ const t=readFrame(); if(t.ok) good++; else why=t.why; }
+          if(good===0){
+            restore(); showCal();
+            result={ok:false,msg:'校正後に読み取れなかったため元に戻しました（'+why+'）'};
+          } else {
+            showCal();
+            const t=burstRead(); paintDebug(t);
+            result={ok:true, msg:'校正しました（一致度 '+before.toFixed(2)+'→'+fit.score.toFixed(2)
+              +'、確認 '+good+'/3）'+(t.ok? ' 読み取り '+t.str+'°C' : '')};
+            await sendSnapshot(url);
+          }
+        }
       }
     } else if(cmd.type==='snapshot'){
       result=await sendSnapshot(url);
     }
   }catch(e){ result={ok:false,msg:String(e)}; }
   try{
-    await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({cmdResult:{id:cmd.id, ok:result.ok, msg:result.msg, at:new Date().toISOString()}})});
+    const health = S.running
+      ? ('記録中／成功 '+S.ok+'・失敗 '+S.ng+(S.last!==null? '・最新 '+S.last+'°C':''))
+      : '記録は停止中です';
+    await fetchTimeout(url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({cmdResult:{id:cmd.id, ok:result.ok,
+        msg:result.msg+'　［'+health+'］', at:new Date().toISOString()}})});
   }catch(e){}
   gsShow('遠隔指示: '+result.msg);
 }
