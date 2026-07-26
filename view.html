@@ -191,6 +191,7 @@ function odoBuild(el, text){
 function odoSet(el, text, dir, ms){
   if(!el) return;
   if(!el._slots || el._text===undefined || el._text.length!==text.length
+     || !el.classList.contains('odo')          // クラスが外されていたら作り直す
      || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
     odoBuild(el, text); return;
   }
@@ -305,8 +306,15 @@ function renderHead(d, state){
   if(m.length>=11){
     const diff=m[0].avg-m[10].avg;
     const arrow = diff>0.05?'▲' : diff<-0.05?'▼' : '→';
-    $('trendBox').textContent = arrow+' 10分で '+(diff>=0?'+':'')+diff.toFixed(1)+'°C';
-  } else $('trendBox').textContent='';
+    const tb=$('trendBox');
+    if(!tb._built){
+      tb.innerHTML='<span id="trArrow"></span><span> 10分で </span>'
+                 + '<span id="trVal"></span><span>°C</span>';
+      tb._built=true;
+    }
+    $('trArrow').textContent=arrow;
+    setVal($('trVal'), (diff>=0?'+':'')+diff.toFixed(1));
+  } else { $('trendBox').textContent=''; $('trendBox')._built=false; }
   $('subBox').textContent = d.at+'（'+d.ageSec+'秒前）';
 
   setVal($('cMax'), fmt(d.allMax));
