@@ -344,6 +344,7 @@ let cfg={hi:null, lo:null, deadMin:5, pollSec:5, bgOn:true, odo:true,
 try{ Object.assign(cfg, JSON.parse(localStorage.getItem(K_SET)||'{}')); }catch(e){}
 
 let data=null, spanMin=60, hover=null, pollTimer=null, nextAt=0;
+let failStreak=0, backoffUntil=0;
 
 function endpoint(){
   const u=new URL(location.href);
@@ -355,16 +356,34 @@ const f1 = v => (Math.round(v*10)/10).toFixed(1);
 async function load(){
   const url=endpoint();
   if(!url){ $('setOverlay').classList.add('on'); $('hdrMeta').textContent='接続先が未設定'; return; }
+  if(Date.now()<backoffUntil) return;          // 失敗直後は間隔をあける
   try{
     const sep=url.includes('?')?'&':'?';
     const res=await fetch(url+sep+'format=json&_='+Date.now());
-    const d=await res.json();
+    const txt=await res.text();
+    let d;
+    try{ d=JSON.parse(txt); }
+    catch(pe){
+      // JSONでない＝Apps Script がエラー画面などを返している
+      const head=txt.replace(/\s+/g,' ').slice(0,160);
+      throw new Error('JSONではない応答（HTTP '+res.status+'）: '+head);
+    }
     if(!d.ok) throw new Error(d.error||'応答が不正');
+    failStreak=0; backoffUntil=0;
     if(d.empty){ $('hdrMeta').textContent='まだ記録がありません'; setDot('warn'); return; }
     data=d; render();
   }catch(e){
-    $('hdrMeta').innerHTML='<span class="err">読み込めません: '+String(e)+'</span>';
+    const msg=String(e && e.message ? e.message : e);
+    $('hdrMeta').innerHTML='<span class="err">読み込めません: '+msg.slice(0,200)+'</span>';
     setDot('dead');
+    console.error('load失敗', e);
+    const bw=document.querySelector('.big');
+    if(bw) bw.classList.add('stale');
+    // 失敗が続くほど間隔をあける（最大2分）。連打で状況を悪化させない
+    failStreak++;
+    const wait=Math.min(120000, Math.max(2,cfg.pollSec)*1000*Math.pow(2, Math.min(failStreak,5)));
+    backoffUntil=Date.now()+wait;
+    $('hdrMeta').innerHTML+='<span class="err">（'+Math.round(wait/1000)+'秒後に再試行）</span>';
   }
   nextAt=Date.now()+Math.max(2,cfg.pollSec)*1000;
 }
@@ -380,7 +399,9 @@ function render(){
   let cls='big';
   if(state==='hot') cls+=' hot'; else if(state==='cold') cls+=' cold';
   else if(stale) cls+=' stale'; else cls+=' normal';
-  document.querySelector('.big').className=cls;
+  const bw=document.querySelector('.big');
+  bw.className=cls; bw.classList.remove('stale');
+  if(state==='') bw.classList.add('normal');
   setNum($('bigNum'), f1(d.temp), d.temp);
   $('at').textContent=d.at+'　'+d.ageSec+'秒前';
   $('hdrMeta').textContent='最終記録 '+d.at;
@@ -450,15 +471,20 @@ let rangeData=null, rangeMin=60, customFrom=null, customTo=null;
 async function loadRange(){
   const url=endpoint();
   if(!url) return;
+  if(failStreak>0 || Date.now()<backoffUntil) return;   // 本体が失敗中は控える
   const sep=url.includes('?')?'&':'?';
   let q='what=range&_='+Date.now();
   if(customFrom && customTo) q+='&from='+encodeURIComponent(customFrom)+'&to='+encodeURIComponent(customTo);
   else q+='&minutes='+rangeMin;
   try{
     const r=await fetch(url+sep+q);
-    const d=await r.json();
+    const t=await r.text();
+    let d;
+    try{ d=JSON.parse(t); }
+    catch(pe){ console.error('range: JSONではない応答', t.slice(0,200)); return; }
     if(d.ok){ rangeData=d; drawChart(); }
-  }catch(e){}
+    else console.error('range: エラー', d.error);
+  }catch(e){ console.error('range失敗', e); }
 }
 
 // 移動平均
