@@ -66,6 +66,12 @@
   .tabs button{background:transparent;color:var(--muted);border:1px solid var(--line);
     border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit}
   .tabs button.on{background:var(--amber);border-color:var(--amber);color:#07142b;font-weight:700}
+  .tabs .ma{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);
+    margin-left:8px;white-space:nowrap}
+  .tabs .ma select{background:#0b1c38;color:var(--text);border:1px solid var(--line);
+    border-radius:5px;padding:3px 5px;font-size:11px;font-family:inherit}
+  .tabs{flex-wrap:wrap}
+  .unitTag{font-size:11px;color:var(--dim);margin-left:auto;font-family:var(--num)}
   #chart{width:100%;height:300px;display:block;cursor:crosshair}
 
   /* 表 */
@@ -104,8 +110,45 @@
     border-radius:6px;padding:8px;font-size:12px;cursor:pointer;font-family:inherit}
   .btnrow button.go{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
   .msg{color:var(--muted);font-size:13px;text-align:center;padding:40px 0;line-height:1.9}
+  .ladderCard{flex:1;display:flex;flex-direction:column;min-height:150px}
+  .ladderNow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
+  .ladderNow b{font-size:22px;font-weight:700}
+  .ladderNow span{font-size:11px;color:var(--muted);font-family:var(--num)}
+  #ladder{display:flex;flex-direction:column;gap:4px;flex:1;justify-content:flex-end}
+  .rung{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;
+    font-size:12px;color:var(--dim);border:1px solid transparent}
+  .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(255,255,255,.18)}
+  .rung span{flex:1}
+  .rung b{font-family:var(--num);font-size:12px;font-weight:700}
+  .rung.on{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--text)}
+  .rung.on b{color:var(--amber)}
   .err{color:var(--red);font-size:11px;word-break:break-all}
   .hint{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.7}
+  /* キオスク表示 */
+  #kiosk{display:none;position:fixed;inset:0;z-index:50;background:var(--kbg,#07142b);
+    flex-direction:column;align-items:center;justify-content:center;gap:6px;
+    transition:background 1.2s ease;cursor:pointer;user-select:none;padding:24px}
+  #kiosk.on{display:flex}
+  .kTop{position:absolute;top:26px;left:0;right:0;display:flex;
+    align-items:center;justify-content:space-between;padding:0 40px}
+  .kDate{font-family:var(--num);font-size:clamp(20px,2.4vw,34px);color:rgba(255,255,255,.75);
+    letter-spacing:.04em}
+  .kBadge{font-size:clamp(18px,2.2vw,30px);font-weight:700;padding:6px 20px;border-radius:999px;
+    background:rgba(255,255,255,.12);color:#fff;letter-spacing:.1em}
+  .kMain{display:flex;align-items:center;gap:20px}
+  .kBig{font-family:var(--num);font-size:clamp(120px,25vw,320px);font-weight:700;line-height:.95;
+    color:#fff;letter-spacing:-.04em;text-shadow:0 6px 40px rgba(0,0,0,.45)}
+  .kBig span{font-size:.3em;margin-left:.06em;opacity:.7}
+  .kArrow{font-size:clamp(40px,7vw,90px);line-height:1;opacity:.85}
+  .kSub{font-family:var(--num);font-size:clamp(14px,1.6vw,22px);color:rgba(255,255,255,.65)}
+  #kSpark{width:min(78vw,900px);height:110px;margin-top:14px;opacity:.95}
+  .kCards{display:flex;gap:clamp(18px,3.4vw,54px);margin-top:18px;flex-wrap:wrap;justify-content:center}
+  .kCards div{text-align:center}
+  .kCards span{display:block;font-size:clamp(11px,1.05vw,14px);color:rgba(255,255,255,.5);margin-bottom:5px}
+  .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:#fff}
+  .kHint{position:absolute;bottom:20px;font-size:12px;color:rgba(255,255,255,.3)}
+  @keyframes pulse{0%,100%{opacity:.85}50%{opacity:.35}}
+  .kBadge.alert{animation:pulse 2.4s ease-in-out infinite}
   kbd{background:#20302a;border:1px solid var(--line);border-radius:3px;padding:1px 5px;
     font-family:var(--mono);font-size:10px}
 </style>
@@ -120,6 +163,7 @@
   <div class="meta" id="countdown"></div>
   <button id="btnRefresh">更新</button>
   <button id="btnCsv">CSV</button>
+  <button id="btnKiosk">大画面</button>
   <button id="btnFull">全画面</button>
   <button id="btnSettings">設定</button>
 </header>
@@ -152,6 +196,12 @@
       <div class="kv"><span>欠測のある分</span><b id="h1gap">-</b></div>
     </div>
 
+    <div class="card ladderCard">
+      <h2>暑さの区分</h2>
+      <div class="ladderNow"><b id="ladderNow">—</b><span id="ladderNext"></span></div>
+      <div id="ladder"></div>
+    </div>
+
     <div class="card" id="setCard" style="display:none">
       <h2>設定</h2>
       <div class="field"><label>接続先</label></div>
@@ -160,12 +210,16 @@
       <div class="field"><label>低温アラート</label><input id="thLo" placeholder="20.0"></div>
       <div class="field"><label>停止とみなす分</label><input id="deadMin" placeholder="5"></div>
       <div class="field"><label>更新間隔（秒）</label><input id="pollSec" placeholder="5"></div>
+      <div class="field" style="margin-top:12px"><label>気温で背景色を変える</label>
+        <input type="checkbox" id="bgOn" style="width:auto"></div>
+      <div id="bandRows"></div>
+      <div class="btnrow"><button id="btnBandReset">色を初期値に戻す</button></div>
       <div class="btnrow">
         <button id="btnNotify">通知を許可</button>
         <button class="go" id="btnSave">保存</button>
       </div>
       <div class="hint">
-        <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 表示期間
+        <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>K</kbd> 大画面　<kbd>1</kbd>〜<kbd>6</kbd> 表示期間
         <div style="margin-top:8px">表示中の書体: <span id="fontNow">—</span></div>
       </div>
     </div>
@@ -174,10 +228,29 @@
   <div class="col">
     <div class="card chartwrap">
       <div class="tabs">
-        <button data-min="10">10分</button>
         <button data-min="30">30分</button>
-        <button data-min="60" class="on">60分</button>
+        <button data-min="60" class="on">1時間</button>
+        <button data-min="360">6時間</button>
+        <button data-min="1440">24時間</button>
+        <button data-min="10080">7日</button>
+        <button data-min="43200">30日</button>
+        <button id="btnCustom">期間指定</button>
         <div class="spacer"></div>
+        <label class="ma"><input type="checkbox" id="maOn" checked> 移動平均
+          <select id="maN">
+            <option value="5">5点</option>
+            <option value="10" selected>10点</option>
+            <option value="30">30点</option>
+          </select>
+        </label>
+        <label class="ma"><input type="checkbox" id="rateOn"> 変化率</label>
+      </div>
+      <div id="customBox" style="display:none;margin-bottom:10px">
+        <div class="field">
+          <label>開始</label><input type="datetime-local" id="cFrom" style="width:auto;flex:1">
+          <label style="flex:none">終了</label><input type="datetime-local" id="cTo" style="width:auto;flex:1">
+          <button id="cApply" style="width:auto;padding:6px 14px;margin:0">表示</button>
+        </div>
       </div>
       <canvas id="chart"></canvas>
     </div>
@@ -196,12 +269,41 @@
   </div>
 </main>
 
+<div id="kiosk">
+  <div class="kTop">
+    <div class="kDate" id="kDate"></div>
+    <div class="kBadge" id="kBadge"></div>
+  </div>
+  <div class="kMain">
+    <div class="kBig" id="kBig">--.-<span>°C</span></div>
+    <div class="kArrow" id="kArrow"></div>
+  </div>
+  <div class="kSub" id="kSub"></div>
+  <canvas id="kSpark"></canvas>
+  <div class="kCards">
+    <div><span>全期間 最高</span><b id="kMax">-</b></div>
+    <div><span>全期間 最低</span><b id="kMin">-</b></div>
+    <div><span>10分の変化</span><b id="kTrend">-</b></div>
+    <div><span>1時間の幅</span><b id="kRange">-</b></div>
+    <div><span>次の区分まで</span><b id="kNext">-</b></div>
+  </div>
+  <div class="kHint">クリック・<kbd>K</kbd>・<kbd>Esc</kbd> で戻る</div>
+</div>
+
 <div id="empty" class="msg" style="display:none"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const K_URL='templogger:viewUrl', K_SET='templogger:alerts';
-let cfg={hi:null, lo:null, deadMin:5, pollSec:5};
+const BANDS_DEFAULT=[
+  {t:-99, name:'平常',   c:'#07142b'},
+  {t:25,  name:'夏日',   c:'#2e3a12'},
+  {t:30,  name:'真夏日', c:'#4a2f0b'},
+  {t:35,  name:'猛暑日', c:'#5c1a10'},
+  {t:40,  name:'酷暑日', c:'#3d0c2b'}
+];
+let cfg={hi:null, lo:null, deadMin:5, pollSec:5, bgOn:true,
+         bands: BANDS_DEFAULT.map(b=>({...b}))};
 try{ Object.assign(cfg, JSON.parse(localStorage.getItem(K_SET)||'{}')); }catch(e){}
 
 let data=null, spanMin=60, hover=null, pollTimer=null, nextAt=0;
@@ -273,6 +375,9 @@ function render(){
     $('h1gap').textContent=gaps+' / '+m.length;
     $('h1gap').className=gaps?'bad':'';
   }
+  applyBg(d.temp);
+  drawLadder(d.temp);
+  renderKiosk();
   drawChart();
   drawTable();
 }
@@ -293,6 +398,45 @@ function checkAlert(d){
   return state;
 }
 
+
+
+/* ---------- 期間データの取得 ---------- */
+let rangeData=null, rangeMin=60, customFrom=null, customTo=null;
+
+async function loadRange(){
+  const url=endpoint();
+  if(!url) return;
+  const sep=url.includes('?')?'&':'?';
+  let q='what=range&_='+Date.now();
+  if(customFrom && customTo) q+='&from='+encodeURIComponent(customFrom)+'&to='+encodeURIComponent(customTo);
+  else q+='&minutes='+rangeMin;
+  try{
+    const r=await fetch(url+sep+q);
+    const d=await r.json();
+    if(d.ok){ rangeData=d; drawChart(); }
+  }catch(e){}
+}
+
+// 移動平均
+function movingAvg(pts, n){
+  const out=[];
+  for(let i=0;i<pts.length;i++){
+    let s=0,c=0;
+    for(let j=Math.max(0,i-n+1); j<=i; j++){ s+=pts[j].avg; c++; }
+    out.push(s/c);
+  }
+  return out;
+}
+// 変化率（°C/時）
+function rateOfChange(pts, unitMin){
+  const out=[];
+  for(let i=0;i<pts.length;i++){
+    if(i===0){ out.push(0); continue; }
+    const dv=pts[i].avg-pts[i-1].avg;
+    out.push(dv/(unitMin/60));
+  }
+  return out;
+}
 
 /* ---------- 欠測を考慮した時系列の組み立て ---------- */
 // minutes は新しい順。ラベル HH:mm から実際の経過分を求める
@@ -337,10 +481,31 @@ function drawChart(){
   cv.width=W*dpr; cv.height=H*dpr;
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,W,H);
-  const all=(data&&data.minutes)?data.minutes:[];
-  const ser=buildSeries(all, spanMin);
-  const pts=ser.pts;
-  if(pts.length<2){ cmap=null; return; }
+
+  // 期間データがあればそれを使う（無ければ直近60分）
+  let pts, gaps=[], total, unitMin=1;
+  if(rangeData && rangeData.points && rangeData.points.length>1){
+    unitMin=rangeData.unit||1;
+    const raw=rangeData.points;
+    const t0=raw[0].t;
+    pts=raw.map(p=>({...p, p:(p.t-t0)/60000/unitMin}));
+    total=pts[pts.length-1].p||1;
+    for(let i=1;i<pts.length;i++){
+      const d=pts[i].p-pts[i-1].p;
+      if(d>1.5) gaps.push({from:pts[i-1].p, to:pts[i].p, minutes:Math.round((d-1)*unitMin)});
+    }
+  } else {
+    const all=(data&&data.minutes)?data.minutes:[];
+    const ser=buildSeries(all, 60);
+    pts=ser.pts; gaps=ser.gaps; total=ser.total;
+  }
+  if(!pts || pts.length<2){ cmap=null; return; }
+  $('unitTag') && ($('unitTag').textContent='');
+
+  const useMA=$('maOn').checked, maN=Number($('maN').value);
+  const useRate=$('rateOn').checked;
+  const ma=useMA?movingAvg(pts,maN):null;
+  const rate=useRate?rateOfChange(pts,unitMin):null;
 
   let mn=Math.min(...pts.map(p=>p.min)), mx=Math.max(...pts.map(p=>p.max));
   if(cfg.hi!==null && cfg.hi<mx+4) mx=Math.max(mx,cfg.hi);
@@ -350,10 +515,10 @@ function drawChart(){
   const lo=Math.floor((mn-span*0.08)/step)*step;
   const hi=Math.ceil((mx+span*0.08)/step)*step;
   const dec=Math.max(0,-Math.floor(Math.log10(step)));
-  const padL=48,padR=14,padT=14,padB=26;
-  const X=p=>padL+(W-padL-padR)*(p/ser.total);          // 実時刻にもとづく位置
+  const padL=48,padR=useRate?52:14,padT=14,padB=26;
+  const X=p=>padL+(W-padL-padR)*(p/total);
   const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
-  cmap={X,Y,pts,padL,padR,W,H,padT,padB,total:ser.total};
+  cmap={X,Y,pts,padL,padR,W,H,padT,padB,total,unitMin,ma,rate};
 
   ctx.font='400 11px "BIZ UDGothic", sans-serif';
   ctx.textBaseline='middle';
@@ -365,29 +530,30 @@ function drawChart(){
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
-  // 欠測の区間を先に塗る
-  ser.gaps.forEach(g=>{
+  gaps.forEach(g=>{
     const x0=X(g.from), x1=X(g.to);
     ctx.fillStyle='rgba(232,80,58,.13)';
     ctx.fillRect(x0,padT,x1-x0,H-padB-padT);
     ctx.strokeStyle='rgba(232,80,58,.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
     ctx.beginPath(); ctx.moveTo(x0,padT); ctx.lineTo(x0,H-padB);
     ctx.moveTo(x1,padT); ctx.lineTo(x1,H-padB); ctx.stroke(); ctx.setLineDash([]);
-    if(x1-x0>34){
+    if(x1-x0>40){
       ctx.fillStyle='#e8503a'; ctx.font='700 10px "BIZ UDGothic", sans-serif';
       const t='欠測'+g.minutes+'分';
       ctx.fillText(t,(x0+x1)/2-ctx.measureText(t).width/2, padT+12);
     }
   });
 
-  // 10分ごとの縦目盛り
-  pts.forEach(p=>{
-    if(!(p.tenMin || Number((p.label||'').split(':')[1])%10===0)) return;
+  // 時刻の目盛り（点数に応じて間引く）
+  const tick=Math.max(1, Math.round(pts.length/8));
+  pts.forEach((p,i)=>{
+    if(i%tick) return;
     const x=X(p.p);
-    ctx.strokeStyle='rgba(255,180,0,.22)'; ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(255,180,0,.18)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
     ctx.fillStyle='#6b86ad'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
-    ctx.fillText(p.label, x-16, H-8);
+    const w=ctx.measureText(p.label).width;
+    ctx.fillText(p.label, Math.min(W-padR-w, Math.max(padL, x-w/2)), H-8);
   });
 
   [[cfg.hi,'#ffb400'],[cfg.lo,'#4fa8e8']].forEach(function(z){
@@ -397,42 +563,68 @@ function drawChart(){
     ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.setLineDash([]);
   });
 
-  // 連続している区間ごとに、帯と線を描く
-  const runs=[]; let cur=[pts[0]];
+  const runs=[]; let cur=[{p:pts[0],i:0}];
   for(let i=1;i<pts.length;i++){
-    if(pts[i].p-pts[i-1].p>1){ runs.push(cur); cur=[]; }
-    cur.push(pts[i]);
+    if(pts[i].p-pts[i-1].p>1.5){ runs.push(cur); cur=[]; }
+    cur.push({p:pts[i],i});
   }
   runs.push(cur);
 
   runs.forEach(run=>{
     if(run.length<2) return;
-    ctx.fillStyle='rgba(79,168,232,.22)';
+    ctx.fillStyle='rgba(79,168,232,.20)';
     ctx.beginPath();
-    run.forEach((p,i)=>{const x=X(p.p),y=Y(p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-    for(let i=run.length-1;i>=0;i--) ctx.lineTo(X(run[i].p),Y(run[i].min));
+    run.forEach((o,i)=>{const x=X(o.p.p),y=Y(o.p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    for(let i=run.length-1;i>=0;i--) ctx.lineTo(X(run[i].p.p),Y(run[i].p.min));
     ctx.closePath(); ctx.fill();
   });
-  ctx.strokeStyle='#ffb400'; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  ctx.strokeStyle=useMA?'rgba(255,180,0,.45)':'#ffb400';
+  ctx.lineWidth=useMA?1.5:2.5; ctx.lineJoin='round';
   runs.forEach(run=>{
     ctx.beginPath();
-    run.forEach((p,i)=>{const x=X(p.p),y=Y(p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-    if(run.length===1){ ctx.arc(X(run[0].p),Y(run[0].avg),2,0,Math.PI*2); ctx.fillStyle='#ffb400'; ctx.fill(); }
-    else ctx.stroke();
+    run.forEach((o,i)=>{const x=X(o.p.p),y=Y(o.p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    if(run.length>1) ctx.stroke();
   });
 
-  // 一部欠測（10秒値が6個未満）の分に印
-  pts.forEach(p=>{
-    if((p.cnt||0)>=6) return;
-    ctx.fillStyle='#e8503a';
-    ctx.beginPath(); ctx.arc(X(p.p),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
-  });
+  // 移動平均
+  if(ma){
+    ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.5; ctx.lineJoin='round';
+    runs.forEach(run=>{
+      ctx.beginPath();
+      run.forEach((o,i)=>{const x=X(o.p.p),y=Y(ma[o.i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+      if(run.length>1) ctx.stroke();
+    });
+  }
+
+  // 変化率（右軸）
+  if(rate){
+    const rmax=Math.max(0.5, Math.max(...rate.map(Math.abs)));
+    const RY=v=>H-padB-(H-padB-padT)*((v+rmax)/(2*rmax));
+    ctx.strokeStyle='rgba(75,194,106,.9)'; ctx.lineWidth=1.5;
+    ctx.beginPath();
+    pts.forEach((p,i)=>{const x=X(p.p),y=RY(rate[i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    ctx.stroke();
+    ctx.strokeStyle='rgba(75,194,106,.3)'; ctx.setLineDash([2,3]);
+    ctx.beginPath(); ctx.moveTo(padL,RY(0)); ctx.lineTo(W-padR,RY(0)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='#4bc26a'; ctx.font='400 10px "BIZ UDGothic", sans-serif';
+    ctx.textAlign='left';
+    ctx.fillText('+'+rmax.toFixed(1), W-padR+4, RY(rmax)+4);
+    ctx.fillText('0', W-padR+4, RY(0)+4);
+    ctx.fillText('-'+rmax.toFixed(1), W-padR+4, RY(-rmax)+4);
+    ctx.fillText('°C/h', W-padR+4, padT+4);
+  }
 
   const last=pts[pts.length-1];
   ctx.fillStyle='#ffb400';
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),5,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#07142b';
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),2,0,Math.PI*2); ctx.fill();
+
+  pts.forEach(p=>{
+    if(unitMin>1 || (p.cnt||0)>=6) return;
+    ctx.fillStyle='#e8503a';
+    ctx.beginPath(); ctx.arc(X(p.p),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
+  });
 
   if(hover!==null && hover>=0 && hover<pts.length){
     const p=pts[hover], hx=X(p.p), hy=Y(p.avg);
@@ -441,8 +633,10 @@ function drawChart(){
     ctx.fillStyle='#f2f6fb';
     ctx.beginPath(); ctx.arc(hx,hy,5,0,Math.PI*2); ctx.fill();
     const lines=[p.label+'　'+f1(p.avg)+'°C',
-                 '最高 '+f1(p.max)+'　最低 '+f1(p.min),
-                 '10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（一部欠測）':'')];
+                 '最高 '+f1(p.max)+'　最低 '+f1(p.min)];
+    if(ma) lines.push('移動平均 '+f1(ma[hover])+'°C');
+    if(rate) lines.push('変化率 '+(rate[hover]>=0?'+':'')+rate[hover].toFixed(2)+'°C/h');
+    if(unitMin===1) lines.push('10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（一部欠測）':''));
     ctx.font='700 13px "BIZ UDGothic", sans-serif';
     const bw=Math.max(...lines.map(l=>ctx.measureText(l).width))+16;
     const bh=lines.length*17+10;
@@ -492,6 +686,153 @@ function drawTable(){
   $('tbody').innerHTML=rows;
 }
 
+
+/* ---------- 気温で背景色を変える（しきい値方式） ---------- */
+function bands(){ return (cfg.bands && cfg.bands.length) ? cfg.bands : BANDS_DEFAULT; }
+function bandOf(temp){
+  const bs=bands();
+  let cur=bs[0];
+  for(const b of bs) if(temp>=b.t) cur=b;
+  return cur;
+}
+function nextBand(temp){
+  const bs=bands();
+  for(const b of bs) if(b.t>temp) return b;
+  return null;
+}
+let bgNow='';
+function applyBg(temp){
+  const b = cfg.bgOn && isFinite(temp) ? bandOf(temp) : {c:'#07142b'};
+  if(b.c===bgNow) return;                     // 区分が変わったときだけ切り替える
+  bgNow=b.c;
+  document.documentElement.style.setProperty('--kbg', b.c);
+  document.body.style.background=b.c;
+}
+
+// しきい値の一覧を設定画面に描く
+function drawBandRows(){
+  const bs=bands();
+  $('bandRows').innerHTML=bs.map((b,i)=>
+    '<div class="field">'
+    + '<label>'+b.name+(b.t>-90?'（'+b.t+'°C 以上）':'（'+bs[1].t+'°C 未満）')+'</label>'
+    + '<input type="color" data-i="'+i+'" class="bandC" value="'+b.c+'" style="width:44px;padding:2px">'
+    + '</div>').join('');
+  document.querySelectorAll('.bandC').forEach(el=>{
+    el.onchange=()=>{ cfg.bands[Number(el.dataset.i)].c=el.value; bgNow=''; applyBg(data?data.temp:NaN); };
+  });
+}
+
+// 現在の区分と、次の区分までの余裕を表示する
+function drawLadder(temp){
+  const bs=bands(), cur=bandOf(temp), nx=nextBand(temp);
+  $('ladder').innerHTML=bs.slice().reverse().map(b=>{
+    const on = b===cur;
+    return '<div class="rung'+(on?' on':'')+'">'
+      + '<i style="background:'+b.c+'"></i>'
+      + '<span>'+b.name+'</span>'
+      + '<b>'+(b.t>-90? b.t+'°C':'—')+'</b></div>';
+  }).join('');
+  $('ladderNow').textContent = cur.name;
+  $('ladderNow').style.color = cur.t>=35 ? 'var(--red)' : cur.t>=30 ? 'var(--amber)'
+                              : cur.t>=25 ? '#c8d94f' : 'var(--muted)';
+  $('ladderNext').textContent = nx
+    ? nx.name+'まで あと '+(nx.t-temp).toFixed(1)+'°C'
+    : '最上位の区分です';
+}
+
+/* ---------- キオスク表示 ---------- */
+let kiosk=false;
+function toggleKiosk(on){
+  kiosk = (on===undefined) ? !kiosk : on;
+  $('kiosk').classList.toggle('on', kiosk);
+  if(kiosk) renderKiosk();
+}
+function renderKiosk(){
+  if(!kiosk || !data) return;
+  const d=data, now=new Date();
+  const p=n=>String(n).padStart(2,'0');
+  const wd=['日','月','火','水','木','金','土'][now.getDay()];
+  $('kDate').textContent = (now.getMonth()+1)+'月'+now.getDate()+'日（'+wd+'）　'
+    + p(now.getHours())+':'+p(now.getMinutes())+':'+p(now.getSeconds());
+
+  const band=bandOf(d.temp);
+  const badge=$('kBadge');
+  badge.textContent=band.name;
+  badge.classList.toggle('alert', band.t>=35);
+  badge.style.background = band.t>=25 ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.10)';
+
+  $('kBig').innerHTML=f1(d.temp)+'<span>°C</span>';
+  $('kSub').textContent=d.at.slice(11)+'　'+d.ageSec+'秒前'
+    + (d.ageSec>600 ? '　※更新が止まっています' : '');
+
+  const m=d.minutes||[];
+  let diff=null;
+  if(m.length>=11) diff=m[0].avg-m[10].avg;
+  $('kArrow').innerHTML = diff===null ? '' :
+    diff>0.05 ? '<span style="color:#ff9d5c">▲</span>' :
+    diff<-0.05 ? '<span style="color:#7fc7f5">▼</span>' :
+    '<span style="color:rgba(255,255,255,.4)">—</span>';
+  $('kTrend').textContent = diff===null?'—':(diff>=0?'+':'')+diff.toFixed(1);
+  $('kMax').textContent=f1(d.allMax);
+  $('kMin').textContent=f1(d.allMin);
+  if(m.length){
+    const mx=Math.max(...m.map(x=>x.max)), mn=Math.min(...m.map(x=>x.min));
+    $('kRange').textContent=(mx-mn).toFixed(1);
+  } else $('kRange').textContent='—';
+  const nx=nextBand(d.temp);
+  $('kNext').textContent = nx ? (nx.t-d.temp).toFixed(1)+'°C' : '—';
+
+  drawSpark();
+}
+
+// 大画面用の推移グラフ
+function drawSpark(){
+  const cv=$('kSpark'); if(!cv) return;
+  const m=(data&&data.minutes)?data.minutes.slice().reverse():[];
+  const ctx=cv.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth, H=cv.clientHeight||110;
+  cv.width=W*dpr; cv.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  if(m.length<2) return;
+  const mn=Math.min(...m.map(x=>x.min)), mx=Math.max(...m.map(x=>x.max));
+  const pad=(mx-mn)*0.18||0.3;
+  const lo=mn-pad, hi=mx+pad;
+  const X=i=>(W)*(i/(m.length-1));
+  const Y=v=>H-8-(H-16)*((v-lo)/((hi-lo)||1));
+  // 区分の境目を薄く引く
+  bands().forEach(b=>{
+    if(b.t<lo||b.t>hi||b.t<-90) return;
+    const y=Y(b.t);
+    ctx.strokeStyle='rgba(255,255,255,.22)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle='rgba(255,255,255,.45)'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
+    ctx.fillText(b.name, 4, y-4);
+  });
+  // 帯
+  ctx.fillStyle='rgba(255,255,255,.16)';
+  ctx.beginPath();
+  m.forEach((x,i)=>{const px=X(i),py=Y(x.max); i?ctx.lineTo(px,py):ctx.moveTo(px,py);});
+  for(let i=m.length-1;i>=0;i--) ctx.lineTo(X(i),Y(m[i].min));
+  ctx.closePath(); ctx.fill();
+  // 線
+  ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  ctx.beginPath();
+  m.forEach((x,i)=>{const px=X(i),py=Y(x.avg); i?ctx.lineTo(px,py):ctx.moveTo(px,py);});
+  ctx.stroke();
+  const last=m[m.length-1];
+  ctx.fillStyle='#fff';
+  ctx.beginPath(); ctx.arc(X(m.length-1),Y(last.avg),4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
+  ctx.fillText(m[0].label, 0, H-1);
+  const t=last.label;
+  ctx.fillText(t, W-ctx.measureText(t).width, H-1);
+}
+
+setInterval(renderKiosk, 1000);
+$('kiosk').onclick=()=>toggleKiosk(false);
+
 /* ---------- 操作 ---------- */
 $('chart').addEventListener('mousemove', e=>{
   if(!cmap) return;
@@ -507,14 +848,39 @@ $('chart').addEventListener('mousemove', e=>{
 });
 $('chart').addEventListener('mouseleave', ()=>{ hover=null; drawChart(); });
 
-document.querySelectorAll('.tabs button').forEach(b=>{
+document.querySelectorAll('.tabs button[data-min]').forEach(b=>{
   b.onclick=()=>{
     document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on'); spanMin=Number(b.dataset.min); hover=null; drawChart();
+    b.classList.add('on');
+    rangeMin=Number(b.dataset.min); spanMin=rangeMin;
+    customFrom=customTo=null; $('customBox').style.display='none';
+    hover=null; rangeData=null; loadRange();
   };
 });
+$('btnCustom').onclick=()=>{
+  const box=$('customBox');
+  const show=box.style.display!=='block';
+  box.style.display=show?'block':'none';
+  if(show && !$('cTo').value){
+    const now=new Date(), ago=new Date(now.getTime()-6*3600*1000);
+    const iso=d=>new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    $('cFrom').value=iso(ago); $('cTo').value=iso(now);
+  }
+};
+$('cApply').onclick=()=>{
+  if(!$('cFrom').value || !$('cTo').value) return;
+  customFrom=new Date($('cFrom').value).toISOString();
+  customTo=new Date($('cTo').value).toISOString();
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  $('btnCustom').classList.add('on');
+  hover=null; rangeData=null; loadRange();
+};
+$('maOn').onchange=drawChart;
+$('maN').onchange=drawChart;
+$('rateOn').onchange=drawChart;
 
 $('btnRefresh').onclick=load;
+$('btnKiosk').onclick=()=>toggleKiosk(true);
 $('btnFull').onclick=()=>{
   if(document.fullscreenElement) document.exitFullscreen();
   else document.documentElement.requestFullscreen().catch(()=>{});
@@ -529,6 +895,8 @@ $('btnSettings').onclick=()=>{
     $('thLo').value=cfg.lo===null?'':cfg.lo;
     $('deadMin').value=cfg.deadMin;
     $('pollSec').value=cfg.pollSec;
+    $('bgOn').checked=!!cfg.bgOn;
+    drawBandRows();
   }
 };
 $('btnSave').onclick=()=>{
@@ -538,10 +906,18 @@ $('btnSave').onclick=()=>{
   cfg.hi=num($('thHi').value); cfg.lo=num($('thLo').value);
   const dm=parseFloat($('deadMin').value); cfg.deadMin=isFinite(dm)?dm:0;
   const ps=parseFloat($('pollSec').value); cfg.pollSec=isFinite(ps)&&ps>=2?ps:5;
+  cfg.bgOn=$('bgOn').checked;
   localStorage.setItem(K_SET, JSON.stringify(cfg));
+  bgNow=''; applyBg(data?data.temp:NaN);
   $('setCard').style.display='none';
   restartPoll(); load();
 };
+$('btnBandReset').onclick=()=>{
+  cfg.bands=BANDS_DEFAULT.map(b=>({...b}));
+  localStorage.setItem(K_SET, JSON.stringify(cfg));
+  drawBandRows(); bgNow=''; applyBg(data?data.temp:NaN);
+};
+$('bgOn').onchange=()=>{ cfg.bgOn=$('bgOn').checked; bgNow=''; applyBg(data?data.temp:NaN); };
 $('btnNotify').onclick=async ()=>{
   if(typeof Notification==='undefined'){ $('btnNotify').textContent='通知は使えません'; return; }
   const p=await Notification.requestPermission();
@@ -563,23 +939,32 @@ $('btnCsv').onclick=()=>{
 document.addEventListener('keydown', e=>{
   if(e.target.tagName==='INPUT') return;
   const k=e.key.toLowerCase();
-  if(k==='r') load();
+  if(k==='r'){ load(); loadRange(); }
   else if(k==='f') $('btnFull').click();
-  else if(k==='1'||k==='2'||k==='3'){
-    const b=document.querySelectorAll('.tabs button')[Number(k)-1];
+  else if(k==='k') toggleKiosk();
+  else if(k==='escape') toggleKiosk(false);
+  else if(k>='1'&&k<='6'){
+    const b=document.querySelectorAll('.tabs button[data-min]')[Number(k)-1];
     if(b) b.click();
   }
 });
 
+let rangeTick=0;
 function restartPoll(){
   if(pollTimer) clearInterval(pollTimer);
-  pollTimer=setInterval(()=>{ if(!document.hidden) load(); }, Math.max(2,cfg.pollSec)*1000);
+  pollTimer=setInterval(()=>{
+    if(document.hidden) return;
+    load();
+    // 長い期間ほど更新はゆっくりでよい
+    const every = rangeMin<=60 ? 6 : rangeMin<=1440 ? 12 : 30;
+    if(++rangeTick % every === 0 && !customFrom) loadRange();
+  }, Math.max(2,cfg.pollSec)*1000);
 }
 setInterval(()=>{
   const left=Math.max(0, Math.ceil((nextAt-Date.now())/1000));
   $('countdown').textContent='次の更新 '+left+'s';
 }, 500);
-window.addEventListener('resize', ()=>{ drawChart(); });
+window.addEventListener('resize', ()=>{ drawChart(); drawSpark(); });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
 
 // どの書体が実際に使われているか判定する
@@ -604,6 +989,7 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load();
 })();
 
 load();
+loadRange();
 restartPoll();
 </script>
 </body>
