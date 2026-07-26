@@ -43,15 +43,21 @@
   header button:hover{background:#2a3f37}
 
 
-  /* オードメーター表示（emベース・書体の実測に依存しない） */
-  .odo{display:inline-flex;align-items:baseline;line-height:1;white-space:nowrap}
-  .odo .slot,.odo .fixed{flex:0 0 auto;color:inherit}
-  .odo .slot{position:relative;display:inline-block;overflow:hidden;
+  /* オードメーター表示
+     .grid2 .g span のような一般的な子孫セレクタに負けて桁送りが壊れたことがあるため、
+     クラスを二重に書いて詳細度を上げ、寸法に関わる指定は必ず自分で持つ */
+  .odo.odo{display:inline-flex;align-items:baseline;line-height:1;white-space:nowrap}
+  .odo.odo .slot,.odo.odo .fixed{
+    flex:0 0 auto;margin:0;padding:0;font-size:inherit;
+    color:inherit;opacity:1;letter-spacing:inherit}
+  .odo.odo .slot{position:relative;display:inline-block;overflow:hidden;
     width:.62em;height:1em;line-height:1em;text-align:center}
-  .odo .slot::after{content:"0";visibility:hidden} /* 透明な数字で基準線を作る */
-  .odo .strip{display:block;position:absolute;left:0;top:0;width:100%;will-change:transform}
-  .odo .strip>span{display:block;height:1em;line-height:1em;text-align:center;flex:0 0 auto}
-  .odo .fixed{display:inline-block;line-height:1em;white-space:pre;text-align:center}
+  .odo.odo .slot::after{content:"0";visibility:hidden} /* 透明な数字で基準線を作る */
+  .odo.odo .strip{display:block;position:absolute;left:0;top:0;width:100%;
+    margin:0;padding:0;font-size:inherit;will-change:transform}
+  .odo.odo .strip>span{display:block;height:1em;line-height:1em;text-align:center;
+    margin:0;padding:0;font-size:inherit;color:inherit;opacity:1}
+  .odo.odo .fixed{display:inline-block;line-height:1em;white-space:pre;text-align:center}
   input,select,button,option{text-shadow:none}
   main{flex:1;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;overflow:hidden}
   @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
@@ -135,7 +141,9 @@
   .col.left .card{padding:11px 13px}
   .nowCard{padding:10px 13px 12px !important}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px}
-  .grid2 .g span{display:block;font-size:10px;color:var(--muted);opacity:.72;
+  /* 直下の子だけに当てる。子孫セレクタにするとオードメーターの
+     内部 span まで巻き込んで桁送りと色が壊れる */
+  .grid2 .g > span{display:block;font-size:10px;color:var(--muted);opacity:.72;
     letter-spacing:.04em;margin-bottom:2px}
   .grid2 .g b{font-family:var(--num);font-size:16px;font-weight:700;line-height:1;
     display:inline-flex;align-items:baseline}
@@ -763,10 +771,11 @@ function drawTable(){
 
 
 /* ---------- オードメーター（数字が回って切り替わる） ----------
-   1桁 = 1em、移動量も em。ピクセル実測をしないので
-   書体・読み込みタイミング・拡大率に関係なく必ず桁に揃う */
-const REPEAT=3, MID=10;
-const odoY = n => 'translateY('+(-(MID+n))+'em)';
+   1桁 = 1em。移動量は「ストリップ全体の高さに対する％」で指定する。
+   ％は自分自身の高さ基準なので、書体・拡大率・端数に関係なく
+   必ず桁の境目で止まる */
+const REPEAT=3, MID=10, ROWS=REPEAT*10;
+const odoY = n => 'translateY('+(-(MID+n)*100/ROWS)+'%)';
 
 function odoBuild(el, text){
   el.classList.add('odo');
