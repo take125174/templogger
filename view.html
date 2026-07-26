@@ -148,7 +148,7 @@ function checkAlert(d){
   if(dead){
     state='dead';
     html='<b>記録が止まっています</b>最後の記録から'+Math.round(d.ageSec/60)
-       +'分経過しました。記録側の画面が閉じていないか確認してください。';
+       +'分経過しました。記録側の画面が閉じていないか確認してください！';
   } else if(cfg.hi!==null && d.temp>=cfg.hi){
     state='hot';
     html='<b>高温です</b>'+fmt(d.temp)+'°C（しきい値 '+fmt(cfg.hi)+'°C 以上）';
