@@ -15,6 +15,14 @@
     /* ラベルなども現在値と同じ色にする */
     --muted:#f2f6fb; --dim:#f2f6fb;
     --green:#4bc26a; --amber:#ffb400; --blue:#4fa8e8; --red:#e8503a;
+    /* canvas や rgba() から使う成分値。applyBg が背景に合わせて書き換える */
+    --textRGB:242,246,251; --greenRGB:75,194,106; --amberRGB:255,180,0;
+    --blueRGB:79,168,232; --redRGB:232,80,58;
+    --shadow:rgba(0,0,0,.45); --kshadow:rgba(0,0,0,.45); --btn:#20302a; --btnH:#2a3f37; --field:#0b0f0d;
+    --onAmber:#07142b;
+    --kbg:#07142b; --kfg:#ffffff; --kfgRGB:255,255,255;
+    --kAmber:#ff9d5c; --kBlue:#7fc7f5;
+    --label:#f2f6fb; --labelFaint:#f2f6fb; --kSoft:#e8ecf2; --kFaint:#aab3c0;
     /* 本文はプロポーショナル、数値は等幅のUDフォント */
     --ja:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
     --num:"Roboto","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI",monospace;
@@ -23,7 +31,7 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{background:var(--ink);color:var(--text);transition:background 1.2s ease,color 1.2s ease;
-    text-shadow:0 1px 2px rgba(0,0,0,.45);
+    text-shadow:0 1px 2px var(--shadow);
     font-family:var(--ja);font-feature-settings:"palt" 1;
     font-variant-numeric:tabular-nums;
     display:flex;flex-direction:column;overflow:hidden}
@@ -37,10 +45,10 @@
   .dot.live{background:var(--green);box-shadow:0 0 10px rgba(75,194,106,.9)}
   .dot.warn{background:var(--amber)} .dot.dead{background:var(--red)}
   .spacer{flex:1}
-  header .meta{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.75}
-  header button{text-shadow:none;background:#20302a;color:var(--text);border:1px solid var(--line);
+  header .meta{font-family:var(--mono);font-size:11px;color:var(--label)}
+  header button{text-shadow:none;background:var(--btn);color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit}
-  header button:hover{background:#2a3f37}
+  header button:hover{background:var(--btnH)}
 
 
   /* オードメーター表示
@@ -65,18 +73,18 @@
   .col{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
     transition:background 1.2s ease,border-color 1.2s ease}
-  .card h2{font-size:12px;letter-spacing:.14em;color:var(--muted);opacity:.75;margin:0 0 10px;font-weight:700}
+  .card h2{font-size:12px;letter-spacing:.14em;color:var(--label);margin:0 0 10px;font-weight:700}
 
   /* 現在値 */
   .big{font-family:var(--num);font-size:clamp(48px,4.4vw,68px);font-weight:700;line-height:1;
-    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 3px 14px rgba(0,0,0,.55)}
+    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 3px 14px var(--shadow)}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
-  .big.normal{color:#ffffff}
+  .big.normal{color:var(--text)}
   .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
   .trend{text-align:center;font-family:var(--num);font-size:13px;font-weight:700;
     color:var(--muted);margin-top:7px;display:flex;align-items:baseline;justify-content:center}
   .trend.up{color:var(--amber)} .trend.down{color:var(--blue)} .trend.flat{color:var(--muted)}
-  .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);opacity:.6;margin-top:6px}
+  .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--label);margin-top:6px}
 
   .kv{display:flex;justify-content:space-between;align-items:baseline;
     padding:6px 0;border-bottom:1px solid rgba(43,55,51,.6);font-size:12px}
@@ -89,10 +97,10 @@
   .tabs{display:flex;gap:6px;margin-bottom:10px}
   .tabs button{background:transparent;color:var(--muted);border:1px solid var(--line);
     border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit}
-  .tabs button.on{background:var(--amber);border-color:var(--amber);color:#07142b;font-weight:700}
+  .tabs button.on{background:var(--amber);border-color:var(--amber);color:var(--onAmber);font-weight:700}
   .tabs .ma{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);
     margin-left:8px;white-space:nowrap}
-  .tabs .ma select{background:#0b1c38;color:var(--text);border:1px solid var(--line);
+  .tabs .ma select{background:var(--field);color:var(--text);border:1px solid var(--line);
     border-radius:5px;padding:3px 5px;font-size:11px;font-family:inherit}
   .tabs{flex-wrap:wrap}
   .unitTag{font-size:11px;color:var(--dim);margin-left:auto;font-family:var(--num)}
@@ -102,16 +110,16 @@
   .tablewrap{flex:1;min-height:0;display:flex;flex-direction:column}
   .scroll{overflow:auto;flex:1;min-height:0}
   table{width:100%;border-collapse:collapse;font-family:var(--num);font-size:15px;font-weight:700}
-  thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);opacity:.8;
+  thead th{position:sticky;top:0;background:var(--panel2);color:var(--label);
     transition:background 1.2s ease;
     font-size:12px;font-weight:700;letter-spacing:.06em;padding:9px 10px;text-align:right;
     border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:first-child{text-align:left}
   tbody td{padding:6px 10px;text-align:right;border-bottom:1px solid rgba(43,55,51,.35)}
-  tbody td:first-child{text-align:left;color:var(--muted);opacity:.78;font-weight:500}
-  tbody tr:hover{background:rgba(255,255,255,.04)}
+  tbody td:first-child{text-align:left;color:var(--label);font-weight:500}
+  tbody tr:hover{background:rgba(var(--textRGB),.04)}
   tbody tr.ten td:first-child{color:var(--amber);font-weight:700}
-  tbody tr.ten{background:rgba(255,180,0,.10)}
+  tbody tr.ten{background:rgba(var(--amberRGB),.10)}
   tbody tr.sel{outline:1px solid var(--amber);outline-offset:-1px}
   .hi{color:var(--amber)} .lo{color:var(--blue)}
   .up{color:var(--amber)} .down{color:var(--blue)} .flat{color:var(--dim)}
@@ -127,11 +135,11 @@
 
   .field{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--muted)}
   .field label{flex:1}
-  .field input{width:82px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);
+  .field input{width:82px;background:var(--field);color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:6px;font-family:var(--mono);font-size:13px;text-align:center}
   .field input.wide{width:100%;text-align:left;font-size:11px}
   .btnrow{display:flex;gap:8px;margin-top:10px}
-  .btnrow button{flex:1;background:#20302a;color:var(--text);border:1px solid var(--line);
+  .btnrow button{flex:1;background:var(--btn);color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:8px;font-size:12px;cursor:pointer;font-family:inherit}
   .btnrow button.go{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
   .msg{color:var(--muted);font-size:13px;text-align:center;padding:40px 0;line-height:1.9}
@@ -143,7 +151,7 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px}
   /* 直下の子だけに当てる。子孫セレクタにするとオードメーターの
      内部 span まで巻き込んで桁送りと色が壊れる */
-  .grid2 .g > span{display:block;font-size:10px;color:var(--muted);opacity:.72;
+  .grid2 .g > span{display:block;font-size:10px;color:var(--label);
     letter-spacing:.04em;margin-bottom:2px}
   .grid2 .g b{font-family:var(--num);font-size:16px;font-weight:700;line-height:1;
     display:inline-flex;align-items:baseline}
@@ -156,22 +164,22 @@
   .ladderCard{flex:1;display:flex;flex-direction:column;min-height:120px}
   .ladderNow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
   .ladderNow b{font-size:19px;font-weight:700}
-  .ladderNow .nextWrap{font-size:11px;color:var(--muted);opacity:.75;font-family:var(--num);
+  .ladderNow .nextWrap{font-size:11px;color:var(--label);font-family:var(--num);
     display:inline-flex;align-items:baseline}
   #ladder{display:flex;flex-direction:column;gap:4px;flex:1;min-height:0}
   .rung{position:relative;overflow:hidden;flex:1;display:flex;align-items:center;gap:8px;
-    padding:4px 8px;border-radius:5px;font-size:11px;color:var(--dim);opacity:.6;
+    padding:4px 8px;border-radius:5px;font-size:11px;color:var(--labelFaint);
     border:1px solid transparent;transition:background .6s ease,color .6s ease}
-  .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(255,255,255,.18)}
+  .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(var(--textRGB),.18)}
   .rung span{flex:1}
   .rung b{font-family:var(--num);font-size:12px;font-weight:700}
-  .rung.on{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--text);opacity:1}
+  .rung.on{background:rgba(var(--textRGB),.07);border-color:var(--line);color:var(--text);opacity:1}
   .rung i,.rung span,.rung b{position:relative;z-index:1}
   .rung .fill{position:absolute;left:0;top:0;bottom:0;z-index:0;
-    background:rgba(255,255,255,.10);transition:width .8s ease}
+    background:rgba(var(--textRGB),.10);transition:width .8s ease}
   .rung.on b{color:var(--amber)}
   .err{color:var(--red);font-size:11px;word-break:break-all}
-  .hint{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.7}
+  .hint{font-size:10px;color:var(--label);margin-top:10px;line-height:1.7}
   /* キオスク表示 */
   #kiosk{display:none;position:fixed;inset:0;z-index:50;background:var(--kbg,#07142b);
     flex-direction:column;align-items:center;justify-content:center;gap:6px;
@@ -179,26 +187,27 @@
   #kiosk.on{display:flex}
   .kTop{position:absolute;top:26px;left:0;right:0;display:flex;
     align-items:center;justify-content:space-between;padding:0 40px}
-  .kDate{font-family:var(--num);font-size:clamp(20px,2.4vw,34px);color:rgba(255,255,255,.75);
+  .kDate{font-family:var(--num);font-size:clamp(20px,2.4vw,34px);color:var(--kSoft);
     letter-spacing:.04em;display:inline-flex;align-items:baseline}
   .kBadge{font-size:clamp(18px,2.2vw,30px);font-weight:700;padding:6px 20px;border-radius:999px;
-    background:rgba(0,0,0,.28);color:#fff;letter-spacing:.1em;text-shadow:0 2px 6px rgba(0,0,0,.6)}
+    background:rgba(var(--kfgRGB),.14);color:var(--kfg);letter-spacing:.1em;
+    text-shadow:0 2px 6px var(--kshadow)}
   .kMain{display:flex;align-items:center;gap:20px}
   .kBig{font-family:var(--num);font-size:clamp(120px,25vw,320px);font-weight:700;line-height:.95;
-    color:#fff;letter-spacing:-.04em;text-shadow:0 6px 40px rgba(0,0,0,.45)}
-  .kBig .u{font-size:.3em;margin-left:.06em;opacity:.7}
+    color:var(--kfg);letter-spacing:-.04em;text-shadow:0 6px 40px var(--kshadow)}
+  .kBig .u{font-size:.3em;margin-left:.06em;color:var(--kSoft)}
   .kArrow{font-size:clamp(40px,7vw,90px);line-height:1;opacity:.85}
-  .kSub{font-family:var(--num);font-size:clamp(14px,1.6vw,22px);color:rgba(255,255,255,.65)}
+  .kSub{font-family:var(--num);font-size:clamp(14px,1.6vw,22px);color:var(--kSoft)}
   #kSpark{width:min(78vw,900px);height:110px;margin-top:14px;opacity:.95}
   .kCards{display:flex;gap:clamp(18px,3.4vw,54px);margin-top:18px;flex-wrap:wrap;justify-content:center}
   .kCards div{text-align:center}
-  .kCards span{display:block;font-size:clamp(11px,1.05vw,14px);color:rgba(255,255,255,.5);margin-bottom:5px}
-  .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:#fff;
-    text-shadow:0 2px 8px rgba(0,0,0,.5);display:inline-flex;align-items:baseline;justify-content:center}
-  .kHint{position:absolute;bottom:20px;font-size:12px;color:rgba(255,255,255,.3)}
+  .kCards span{display:block;font-size:clamp(11px,1.05vw,14px);color:var(--kSoft);margin-bottom:5px}
+  .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:var(--kfg);
+    text-shadow:0 2px 8px var(--kshadow);display:inline-flex;align-items:baseline;justify-content:center}
+  .kHint{position:absolute;bottom:20px;font-size:12px;color:var(--kFaint)}
   @keyframes pulse{0%,100%{opacity:.85}50%{opacity:.35}}
   .kBadge.alert{animation:pulse 2.4s ease-in-out infinite}
-  kbd{background:#20302a;border:1px solid var(--line);border-radius:3px;padding:1px 5px;
+  kbd{background:var(--btn);border:1px solid var(--line);border-radius:3px;padding:1px 5px;
     font-family:var(--mono);font-size:10px}
 </style>
 </head>
@@ -605,20 +614,20 @@ function drawChart(){
     const y=Y(v);
     ctx.strokeStyle=cssv('--line'); ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(padL,Math.round(y)+.5); ctx.lineTo(W-padR,Math.round(y)+.5); ctx.stroke();
-    ctx.fillStyle=cssv('--muted'); ctx.globalAlpha=.8;
-    ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y); ctx.globalAlpha=1;
+    ctx.fillStyle=cssv('--label');
+    ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
   gaps.forEach(g=>{
     const x0=X(g.from), x1=X(g.to);
-    ctx.fillStyle='rgba(232,80,58,.13)';
+    ctx.fillStyle='rgba('+cssv('--redRGB')+',.13)';
     ctx.fillRect(x0,padT,x1-x0,H-padB-padT);
-    ctx.strokeStyle='rgba(232,80,58,.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.strokeStyle='rgba('+cssv('--redRGB')+',.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
     ctx.beginPath(); ctx.moveTo(x0,padT); ctx.lineTo(x0,H-padB);
     ctx.moveTo(x1,padT); ctx.lineTo(x1,H-padB); ctx.stroke(); ctx.setLineDash([]);
     if(x1-x0>40){
-      ctx.fillStyle='#e8503a'; ctx.font='700 10px "Roboto","BIZ UDPGothic",sans-serif';
+      ctx.fillStyle=cssv('--red'); ctx.font='700 10px "Roboto","BIZ UDPGothic",sans-serif';
       const t='欠測'+g.minutes+'分';
       ctx.fillText(t,(x0+x1)/2-ctx.measureText(t).width/2, padT+12);
     }
@@ -629,16 +638,15 @@ function drawChart(){
   pts.forEach((p,i)=>{
     if(i%tick) return;
     const x=X(p.p);
-    ctx.strokeStyle='rgba(255,180,0,.18)'; ctx.lineWidth=1;
+    ctx.strokeStyle='rgba('+cssv('--amberRGB')+',.18)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
-    ctx.fillStyle=cssv('--dim'); ctx.globalAlpha=.7;
+    ctx.fillStyle=cssv('--label');
     ctx.font='700 11px "Roboto","BIZ UDPGothic",sans-serif';
     const w=ctx.measureText(p.label).width;
     ctx.fillText(p.label, Math.min(W-padR-w, Math.max(padL, x-w/2)), H-8);
-    ctx.globalAlpha=1;
   });
 
-  [[cfg.hi,'#ffb400'],[cfg.lo,'#4fa8e8']].forEach(function(z){
+  [[cfg.hi,cssv('--amber')],[cfg.lo,cssv('--blue')]].forEach(function(z){
     if(z[0]===null||z[0]<lo||z[0]>hi) return;
     const y=Y(z[0]);
     ctx.strokeStyle=z[1]; ctx.lineWidth=1; ctx.setLineDash([5,4]);
@@ -654,13 +662,13 @@ function drawChart(){
 
   runs.forEach(run=>{
     if(run.length<2) return;
-    ctx.fillStyle='rgba(79,168,232,.20)';
+    ctx.fillStyle='rgba('+cssv('--blueRGB')+',.20)';
     ctx.beginPath();
     run.forEach((o,i)=>{const x=X(o.p.p),y=Y(o.p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
     for(let i=run.length-1;i>=0;i--) ctx.lineTo(X(run[i].p.p),Y(run[i].p.min));
     ctx.closePath(); ctx.fill();
   });
-  ctx.strokeStyle=useMA?'rgba(255,180,0,.45)':'#ffb400';
+  ctx.strokeStyle=useMA?'rgba('+cssv('--amberRGB')+',.45)':cssv('--amber');
   ctx.lineWidth=useMA?1.5:2.5; ctx.lineJoin='round';
   runs.forEach(run=>{
     ctx.beginPath();
@@ -670,7 +678,7 @@ function drawChart(){
 
   // 移動平均
   if(ma){
-    ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.5; ctx.lineJoin='round';
+    ctx.strokeStyle=cssv('--text'); ctx.lineWidth=2.5; ctx.lineJoin='round';
     runs.forEach(run=>{
       ctx.beginPath();
       run.forEach((o,i)=>{const x=X(o.p.p),y=Y(ma[o.i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
@@ -682,13 +690,13 @@ function drawChart(){
   if(rate){
     const rmax=Math.max(0.5, Math.max(...rate.map(Math.abs)));
     const RY=v=>H-padB-(H-padB-padT)*((v+rmax)/(2*rmax));
-    ctx.strokeStyle='rgba(75,194,106,.9)'; ctx.lineWidth=1.5;
+    ctx.strokeStyle='rgba('+cssv('--greenRGB')+',.9)'; ctx.lineWidth=1.5;
     ctx.beginPath();
     pts.forEach((p,i)=>{const x=X(p.p),y=RY(rate[i]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
     ctx.stroke();
-    ctx.strokeStyle='rgba(75,194,106,.3)'; ctx.setLineDash([2,3]);
+    ctx.strokeStyle='rgba('+cssv('--greenRGB')+',.3)'; ctx.setLineDash([2,3]);
     ctx.beginPath(); ctx.moveTo(padL,RY(0)); ctx.lineTo(W-padR,RY(0)); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle='#4bc26a'; ctx.font='400 10px "Roboto","BIZ UDPGothic",sans-serif';
+    ctx.fillStyle=cssv('--green'); ctx.font='400 10px "Roboto","BIZ UDPGothic",sans-serif';
     ctx.textAlign='left';
     ctx.fillText('+'+rmax.toFixed(1), W-padR+4, RY(rmax)+4);
     ctx.fillText('0', W-padR+4, RY(0)+4);
@@ -697,22 +705,22 @@ function drawChart(){
   }
 
   const last=pts[pts.length-1];
-  ctx.fillStyle='#ffb400';
+  ctx.fillStyle=cssv('--amber');
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),5,0,Math.PI*2); ctx.fill();
   ctx.fillStyle=cssv('--ink');
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),2,0,Math.PI*2); ctx.fill();
 
   pts.forEach(p=>{
     if(unitMin>1 || (p.cnt||0)>=6) return;
-    ctx.fillStyle='#e8503a';
+    ctx.fillStyle=cssv('--red');
     ctx.beginPath(); ctx.arc(X(p.p),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
   });
 
   if(hover!==null && hover>=0 && hover<pts.length){
     const p=pts[hover], hx=X(p.p), hy=Y(p.avg);
-    ctx.strokeStyle='rgba(242,246,251,.8)'; ctx.lineWidth=1;
+    ctx.strokeStyle='rgba('+cssv('--textRGB')+',.8)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,H-padB); ctx.stroke();
-    ctx.fillStyle='#f2f6fb';
+    ctx.fillStyle=cssv('--text');
     ctx.beginPath(); ctx.arc(hx,hy,5,0,Math.PI*2); ctx.fill();
     const lines=[p.label+'　'+f1(p.avg)+'°C',
                  '最高 '+f1(p.max)+'　最低 '+f1(p.min)];
@@ -728,7 +736,7 @@ function drawChart(){
     ctx.strokeStyle=cssv('--line'); ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
     ctx.textBaseline='middle';
     lines.forEach((l,i)=>{
-      ctx.fillStyle = i===0 ? cssv('--amber') : cssv('--muted');
+      ctx.fillStyle = i===0 ? cssv('--amber') : cssv('--text');
       ctx.fillText(l, bx+8, by+16+i*17);
     });
     ctx.textBaseline='alphabetic';
@@ -874,6 +882,43 @@ function nextBand(temp){
   for(const b of bs) if(b.t>temp) return b;
   return null;
 }
+// 色の明るさを人の感じ方に合わせて測る（WCAG 相対輝度）
+function srgbC(v){ v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); }
+function relLum(c){ return 0.2126*srgbC(c[0])+0.7152*srgbC(c[1])+0.0722*srgbC(c[2]); }
+// 2色の見分けやすさ。1（同じ）〜21（白と黒）
+function contrast(a,b){
+  const l1=relLum(a), l2=relLum(b);
+  return (Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05);
+}
+function mixc(a,b,t){ return a.map((v,i)=>Math.round(v+(b[i]-v)*t)); }
+// その背景で読みやすい方（明るい文字／暗い文字）を選ぶ
+function inkFor(bg){
+  const w=[255,255,255], k=[12,16,22];
+  return contrast(w,bg) >= contrast(k,bg) ? w : k;
+}
+// 色みは残したまま、必要な見分けやすさに届くまで明暗を寄せる。
+// 寄せる先は、その背景に対して実際に差がつく側（黒か白か）を選ぶ
+function fitContrast(c, bg, target){
+  const toward = contrast([255,255,255],bg) > contrast([0,0,0],bg)
+               ? [255,255,255] : [0,0,0];
+  let out=c;
+  for(let t=0; t<=1.0001; t+=0.04){
+    out=mixc(c,toward,t);
+    if(contrast(out,bg)>=target) break;
+  }
+  return out;
+}
+// 控えめに見せたい文字用。背景へ溶かせるだけ溶かして、
+// 目標のコントラストを割る手前で止める（透明度で薄めると背景次第で読めなくなるため）
+function softFor(fg, bg, target){
+  let out=fg;
+  for(let t=0; t<=1.0001; t+=0.04){
+    const c=mixc(fg,bg,t);
+    if(contrast(c,bg)<target) break;
+    out=c;
+  }
+  return out;
+}
 function hex2rgb(h){
   const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h||'');
   return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:[7,20,43];
@@ -885,19 +930,60 @@ function darken(rgb,t){ return rgb.map(v=>Math.round(v*(1-t))); }
 function lum(rgb){ return (rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114)/255; }
 
 let bgNow='';
-// 区分の色から、画面全体の配色を作る
+// 区分の色から、画面全体の配色を作る。
+// 背景が明るいか暗いかを測り、文字・罫線・アクセントを読みやすい側へ組み替える
 function applyBg(temp){
   const b = cfg.bgOn && isFinite(temp) ? bandOf(temp) : BANDS_DEFAULT[0];
   if(b.c===bgNow) return;                     // 区分が変わったときだけ切り替える
   bgNow=b.c;
   const base=hex2rgb(b.c);
+  const light=relLum(base)>0.42;              // 明るい背景か
   const r=document.documentElement.style;
-  // 変えるのは面の色だけ。文字色は固定して読みやすさを保つ
+
+  // 面の色。暗い背景なら沈ませ、明るい背景なら紙のように浮かせる
+  const panel  = light ? mixc(base,[255,255,255],0.42) : darken(base,0.34);
+  const panel2 = light ? mixc(base,[255,255,255],0.55) : darken(base,0.46);
+  const ink    = inkFor(panel);               // 本文の色
+  const kink   = inkFor(base);                // 大画面の文字色（背景色の上に直接乗る）
+
   r.setProperty('--ink',   rgbs(base));
-  r.setProperty('--panel', rgbs(darken(base, 0.34)));   // 背景より少し暗く
-  r.setProperty('--panel2',rgbs(darken(base, 0.46)));
-  r.setProperty('--line',  rgbs(lighten(base, 0.20)));
+  r.setProperty('--panel', rgbs(panel));
+  r.setProperty('--panel2',rgbs(panel2));
+  r.setProperty('--text',  rgbs(ink));
+  r.setProperty('--muted', rgbs(ink));
+  r.setProperty('--dim',   rgbs(ink));
+  r.setProperty('--textRGB', ink.join(','));
+  r.setProperty('--line',  rgbs(mixc(panel, ink, 0.22)));
+  r.setProperty('--btn',   rgbs(mixc(panel, ink, 0.12)));
+  r.setProperty('--btnH',  rgbs(mixc(panel, ink, 0.20)));
+  r.setProperty('--field', rgbs(mixc(panel, ink, 0.07)));
+  // 補助文字は薄めるのではなく、読める範囲で背景に寄せた実色にする。
+  // 目標は全段階 4.5:1。強弱は色の濃さではなく文字の大きさと太さで付ける
+  r.setProperty('--label',      rgbs(softFor(ink, panel, 4.5)));
+  r.setProperty('--labelFaint', rgbs(softFor(ink, panel, 4.5)));
+  r.setProperty('--kSoft',      rgbs(softFor(kink, base, 4.5)));
+  r.setProperty('--kFaint',     rgbs(softFor(kink, base, 4.5)));
+  // 影は文字色の反対側に置く。暗い文字に黒い影を敷くと濁って見える
+  const shadowFor = c => relLum(c)>0.5 ? 'rgba(0,0,0,.45)' : 'rgba(255,255,255,.5)';
+  r.setProperty('--shadow',  shadowFor(ink));
+  r.setProperty('--kshadow', shadowFor(kink));
+
+  // アクセント色は色みを保ったまま、面の色に対して 4.5:1 を確保する
+  const acc={amber:'#ffb400', blue:'#4fa8e8', green:'#4bc26a', red:'#e8503a'};
+  for(const k in acc){
+    const c=fitContrast(hex2rgb(acc[k]), panel, 4.5);
+    r.setProperty('--'+k, rgbs(c));
+    r.setProperty('--'+k+'RGB', c.join(','));
+  }
+  r.setProperty('--onAmber', rgbs(inkFor(fitContrast(hex2rgb(acc.amber), panel, 4.5))));
+
+  // 大画面は背景色そのものの上に文字が乗るので、別に合わせる
   r.setProperty('--kbg',   rgbs(base));
+  r.setProperty('--kfg',   rgbs(kink));
+  r.setProperty('--kfgRGB', kink.join(','));
+  r.setProperty('--kAmber', rgbs(fitContrast(hex2rgb('#ff9d5c'), base, 4.5)));
+  r.setProperty('--kBlue',  rgbs(fitContrast(hex2rgb('#4fa8e8'), base, 4.5)));
+
   document.body.style.background=rgbs(base);
   // 配色が変わったらグラフも描き直す
   setTimeout(()=>{ drawChart(); drawSpark(); }, 60);
@@ -938,7 +1024,7 @@ function drawLadder(temp){
   }).join('');
   $('ladderNow').textContent = cur.name;
   $('ladderNow').style.color = cur.t>=35 ? 'var(--red)' : cur.t>=30 ? 'var(--amber)'
-                              : cur.t>=25 ? '#c8d94f' : 'var(--muted)';
+                              : cur.t>=25 ? 'var(--green)' : 'var(--muted)';
   if(nx){
     $('ladderNextName').textContent=nx.name+'まで あと ';
     setVal($('ladderNextV'), (nx.t-temp).toFixed(1));
@@ -968,7 +1054,7 @@ function renderKiosk(){
   const badge=$('kBadge');
   badge.textContent=band.name;
   badge.classList.toggle('alert', band.t>=35);
-  badge.style.background = band.t>=25 ? 'rgba(255,255,255,.18)' : 'rgba(255,255,255,.10)';
+  badge.style.background = 'rgba('+cssv('--kfgRGB')+(band.t>=25 ? ',.18)' : ',.10)');
 
   setNum($('kBigNum'), f1(d.temp), d.temp);
   $('kSub').textContent=d.at.slice(11)+'　'+d.ageSec+'秒前'
@@ -978,9 +1064,9 @@ function renderKiosk(){
   let diff=null;
   if(m.length>=11) diff=m[0].avg-m[10].avg;
   $('kArrow').innerHTML = diff===null ? '' :
-    diff>0.05 ? '<span style="color:#ff9d5c">▲</span>' :
-    diff<-0.05 ? '<span style="color:#7fc7f5">▼</span>' :
-    '<span style="color:rgba(255,255,255,.4)">—</span>';
+    diff>0.05 ? '<span style="color:var(--kAmber)">▲</span>' :
+    diff<-0.05 ? '<span style="color:var(--kBlue)">▼</span>' :
+    '<span style="color:var(--kSoft)">—</span>';
   if(diff===null) $('kTrend').textContent='—';
   else setVal($('kTrend'), (diff>=0?'+':'')+diff.toFixed(1));
   setVal($('kMax'), f1(d.allMax));
@@ -1016,26 +1102,26 @@ function drawSpark(){
   bands().forEach(b=>{
     if(b.t<lo||b.t>hi||b.t<-90) return;
     const y=Y(b.t);
-    ctx.strokeStyle='rgba(255,255,255,.22)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
+    ctx.strokeStyle='rgba('+cssv('--kfgRGB')+',.22)'; ctx.lineWidth=1; ctx.setLineDash([4,4]);
     ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle='rgba(255,255,255,.45)'; ctx.font='700 11px "Roboto","BIZ UDPGothic",sans-serif';
+    ctx.fillStyle=cssv('--kSoft'); ctx.font='700 11px "Roboto","BIZ UDPGothic",sans-serif';
     ctx.fillText(b.name, 4, y-4);
   });
   // 帯
-  ctx.fillStyle='rgba(255,255,255,.16)';
+  ctx.fillStyle='rgba('+cssv('--kfgRGB')+',.16)';
   ctx.beginPath();
   m.forEach((x,i)=>{const px=X(i),py=Y(x.max); i?ctx.lineTo(px,py):ctx.moveTo(px,py);});
   for(let i=m.length-1;i>=0;i--) ctx.lineTo(X(i),Y(m[i].min));
   ctx.closePath(); ctx.fill();
   // 線
-  ctx.strokeStyle='#ffffff'; ctx.lineWidth=2.5; ctx.lineJoin='round';
+  ctx.strokeStyle=cssv('--kfg'); ctx.lineWidth=2.5; ctx.lineJoin='round';
   ctx.beginPath();
   m.forEach((x,i)=>{const px=X(i),py=Y(x.avg); i?ctx.lineTo(px,py):ctx.moveTo(px,py);});
   ctx.stroke();
   const last=m[m.length-1];
-  ctx.fillStyle='#fff';
+  ctx.fillStyle=cssv('--kfg');
   ctx.beginPath(); ctx.arc(X(m.length-1),Y(last.avg),4,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,.5)'; ctx.font='700 11px "Roboto","BIZ UDPGothic",sans-serif';
+  ctx.fillStyle=cssv('--kSoft'); ctx.font='700 11px "Roboto","BIZ UDPGothic",sans-serif';
   ctx.fillText(m[0].label, 0, H-1);
   const t=last.label;
   ctx.fillText(t, W-ctx.measureText(t).width, H-1);
