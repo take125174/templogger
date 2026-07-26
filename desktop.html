@@ -20,14 +20,15 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
-  body{background:var(--ink);color:var(--text);
+  body{background:var(--ink);color:var(--text);transition:background 1.2s ease,color 1.2s ease;
     font-family:var(--ja);font-feature-settings:"palt" 1;
     font-variant-numeric:tabular-nums;
     display:flex;flex-direction:column;overflow:hidden}
 
   /* 上部バー */
   header{display:flex;align-items:center;gap:16px;padding:10px 18px;
-    border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+    border-bottom:1px solid var(--line);background:var(--panel);flex:none;
+    transition:background 1.2s ease,border-color 1.2s ease}
   header h1{font-size:15px;font-weight:700;letter-spacing:.18em;margin:0}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
   .dot.live{background:var(--green);box-shadow:0 0 10px rgba(75,194,106,.9)}
@@ -42,16 +43,17 @@
   @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
 
   .col{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
+    transition:background 1.2s ease,border-color 1.2s ease}
   .card h2{font-size:12px;letter-spacing:.14em;color:var(--muted);margin:0 0 10px;font-weight:700}
 
   /* 現在値 */
-  .big{font-family:var(--num);font-size:76px;font-weight:700;line-height:1;color:var(--text);
-    text-align:center;letter-spacing:-.03em;text-shadow:0 2px 12px rgba(0,0,0,.5)}
+  .big{font-family:var(--num);font-size:clamp(48px,4.4vw,68px);font-weight:700;line-height:1;
+    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 2px 12px rgba(0,0,0,.45)}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
   .big.normal{color:#ffffff}
   .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
-  .trend{text-align:center;font-family:var(--num);font-size:15px;font-weight:700;color:var(--muted);margin-top:10px}
+  .trend{text-align:center;font-family:var(--num);font-size:13px;font-weight:700;color:var(--muted);margin-top:7px}
   .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
 
   .kv{display:flex;justify-content:space-between;align-items:baseline;
@@ -72,13 +74,14 @@
     border-radius:5px;padding:3px 5px;font-size:11px;font-family:inherit}
   .tabs{flex-wrap:wrap}
   .unitTag{font-size:11px;color:var(--dim);margin-left:auto;font-family:var(--num)}
-  #chart{width:100%;height:300px;display:block;cursor:crosshair}
+  #chart{width:100%;height:min(300px,34vh);display:block;cursor:crosshair}
 
   /* 表 */
   .tablewrap{flex:1;min-height:0;display:flex;flex-direction:column}
   .scroll{overflow:auto;flex:1;min-height:0}
   table{width:100%;border-collapse:collapse;font-family:var(--num);font-size:15px;font-weight:700}
   thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);
+    transition:background 1.2s ease;
     font-size:12px;font-weight:700;letter-spacing:.06em;padding:9px 10px;text-align:right;
     border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:first-child{text-align:left}
@@ -110,13 +113,27 @@
     border-radius:6px;padding:8px;font-size:12px;cursor:pointer;font-family:inherit}
   .btnrow button.go{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
   .msg{color:var(--muted);font-size:13px;text-align:center;padding:40px 0;line-height:1.9}
-  .ladderCard{flex:1;display:flex;flex-direction:column;min-height:150px}
+
+  /* 左カラムはスクロールせず収める */
+  .col.left{overflow:hidden}
+  .col.left .card{padding:11px 13px}
+  .nowCard{padding:10px 13px 12px !important}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px}
+  .grid2 .g span{display:block;font-size:10px;color:var(--muted);letter-spacing:.04em;margin-bottom:2px}
+  .grid2 .g b{font-family:var(--num);font-size:16px;font-weight:700;line-height:1}
+
+  /* 設定は重ねて出す */
+  #setOverlay{display:none;position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);
+    align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
+  #setOverlay.on{display:flex}
+  #setOverlay .card{width:min(460px,100%);max-height:calc(100vh - 80px);overflow:auto}
+  .ladderCard{flex:1;display:flex;flex-direction:column;min-height:120px}
   .ladderNow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
-  .ladderNow b{font-size:22px;font-weight:700}
+  .ladderNow b{font-size:19px;font-weight:700}
   .ladderNow span{font-size:11px;color:var(--muted);font-family:var(--num)}
   #ladder{display:flex;flex-direction:column;gap:4px;flex:1;justify-content:flex-end}
-  .rung{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;
-    font-size:12px;color:var(--dim);border:1px solid transparent}
+  .rung{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:5px;
+    font-size:11px;color:var(--dim);border:1px solid transparent}
   .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(255,255,255,.18)}
   .rung span{flex:1}
   .rung b{font-family:var(--num);font-size:12px;font-weight:700}
@@ -169,59 +186,31 @@
 </header>
 
 <main>
-  <div class="col">
+  <div class="col left">
     <div class="banner" id="alert"></div>
 
-    <div class="card">
+    <div class="card nowCard">
       <div class="big" id="big">--.-<small>°C</small></div>
       <div class="trend" id="trend"></div>
       <div class="at" id="at"></div>
     </div>
 
     <div class="card">
-      <h2>全期間</h2>
-      <div class="kv"><span>最高</span><b class="hi" id="allMax">-</b></div>
-      <div class="kv"><span>最低</span><b class="lo" id="allMin">-</b></div>
-      <div class="kv"><span>10秒値</span><b id="cnt">-</b></div>
-      <div class="kv"><span>生データ</span><b id="rawCnt">-</b></div>
-    </div>
-
-    <div class="card">
-      <h2>直近1時間</h2>
-      <div class="kv"><span>最高</span><b class="hi" id="h1max">-</b></div>
-      <div class="kv"><span>最低</span><b class="lo" id="h1min">-</b></div>
-      <div class="kv"><span>平均</span><b id="h1avg">-</b></div>
-      <div class="kv"><span>変動幅</span><b id="h1range">-</b></div>
-      <div class="kv"><span>標準偏差</span><b id="h1sd">-</b></div>
-      <div class="kv"><span>欠測のある分</span><b id="h1gap">-</b></div>
+      <div class="grid2">
+        <div class="g"><span>全期間 最高</span><b class="hi" id="allMax">-</b></div>
+        <div class="g"><span>全期間 最低</span><b class="lo" id="allMin">-</b></div>
+        <div class="g"><span>1時間 最高</span><b class="hi" id="h1max">-</b></div>
+        <div class="g"><span>1時間 最低</span><b class="lo" id="h1min">-</b></div>
+        <div class="g"><span>1時間 平均</span><b id="h1avg">-</b></div>
+        <div class="g"><span>1時間 変動幅</span><b id="h1range">-</b></div>
+        <div class="g"><span>10秒値 / 生</span><b id="cnt">-</b></div>
+        <div class="g"><span>欠測のある分</span><b id="h1gap">-</b></div>
+      </div>
     </div>
 
     <div class="card ladderCard">
-      <h2>暑さの区分</h2>
       <div class="ladderNow"><b id="ladderNow">—</b><span id="ladderNext"></span></div>
       <div id="ladder"></div>
-    </div>
-
-    <div class="card" id="setCard" style="display:none">
-      <h2>設定</h2>
-      <div class="field"><label>接続先</label></div>
-      <div class="field"><input class="wide" id="url" placeholder="…/exec"></div>
-      <div class="field"><label>高温アラート</label><input id="thHi" placeholder="35.0"></div>
-      <div class="field"><label>低温アラート</label><input id="thLo" placeholder="20.0"></div>
-      <div class="field"><label>停止とみなす分</label><input id="deadMin" placeholder="5"></div>
-      <div class="field"><label>更新間隔（秒）</label><input id="pollSec" placeholder="5"></div>
-      <div class="field" style="margin-top:12px"><label>気温で背景色を変える</label>
-        <input type="checkbox" id="bgOn" style="width:auto"></div>
-      <div id="bandRows"></div>
-      <div class="btnrow"><button id="btnBandReset">色を初期値に戻す</button></div>
-      <div class="btnrow">
-        <button id="btnNotify">通知を許可</button>
-        <button class="go" id="btnSave">保存</button>
-      </div>
-      <div class="hint">
-        <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>K</kbd> 大画面　<kbd>1</kbd>〜<kbd>6</kbd> 表示期間
-        <div style="margin-top:8px">表示中の書体: <span id="fontNow">—</span></div>
-      </div>
     </div>
   </div>
 
@@ -268,6 +257,30 @@
     </div>
   </div>
 </main>
+
+<div id="setOverlay">
+  <div class="card" id="setCard">
+    <h2>設定</h2>
+    <div class="field"><label>接続先</label></div>
+    <div class="field"><input class="wide" id="url" placeholder="…/exec"></div>
+    <div class="field"><label>高温アラート</label><input id="thHi" placeholder="35.0"></div>
+    <div class="field"><label>低温アラート</label><input id="thLo" placeholder="20.0"></div>
+    <div class="field"><label>停止とみなす分</label><input id="deadMin" placeholder="5"></div>
+    <div class="field"><label>更新間隔（秒）</label><input id="pollSec" placeholder="5"></div>
+    <div class="field" style="margin-top:12px"><label>気温で配色を変える</label>
+      <input type="checkbox" id="bgOn" style="width:auto"></div>
+    <div id="bandRows"></div>
+    <div class="btnrow"><button id="btnBandReset">色を初期値に戻す</button></div>
+    <div class="btnrow">
+      <button id="btnNotify">通知を許可</button>
+      <button class="go" id="btnSave">保存して閉じる</button>
+    </div>
+    <div class="hint">
+      <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>K</kbd> 大画面　<kbd>1</kbd>〜<kbd>6</kbd> 表示期間
+      <div style="margin-top:8px">表示中の書体: <span id="fontNow">—</span></div>
+    </div>
+  </div>
+</div>
 
 <div id="kiosk">
   <div class="kTop">
@@ -317,7 +330,7 @@ const f1 = v => (Math.round(v*10)/10).toFixed(1);
 /* ---------- 取得 ---------- */
 async function load(){
   const url=endpoint();
-  if(!url){ $('setCard').style.display='block'; $('hdrMeta').textContent='接続先が未設定'; return; }
+  if(!url){ $('setOverlay').classList.add('on'); $('hdrMeta').textContent='接続先が未設定'; return; }
   try{
     const sep=url.includes('?')?'&':'?';
     const res=await fetch(url+sep+'format=json&_='+Date.now());
@@ -358,8 +371,7 @@ function render(){
 
   $('allMax').textContent=f1(d.allMax);
   $('allMin').textContent=f1(d.allMin);
-  $('cnt').textContent=(d.count||0).toLocaleString();
-  $('rawCnt').textContent=(d.rawCount||0).toLocaleString();
+  $('cnt').textContent=(d.count||0).toLocaleString()+' / '+(d.rawCount||0).toLocaleString();
 
   // 直近1時間の統計
   if(m.length){
@@ -371,7 +383,6 @@ function render(){
     $('h1max').textContent=f1(mx); $('h1min').textContent=f1(mn);
     $('h1avg').textContent=mean.toFixed(2);
     $('h1range').textContent=(mx-mn).toFixed(1);
-    $('h1sd').textContent=sd.toFixed(3);
     $('h1gap').textContent=gaps+' / '+m.length;
     $('h1gap').className=gaps?'bad':'';
   }
@@ -524,9 +535,9 @@ function drawChart(){
   ctx.textBaseline='middle';
   for(let v=lo; v<=hi+step*1e-6; v+=step){
     const y=Y(v);
-    ctx.strokeStyle='#1d3a63'; ctx.lineWidth=1;
+    ctx.strokeStyle=cssv('--line'); ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(padL,Math.round(y)+.5); ctx.lineTo(W-padR,Math.round(y)+.5); ctx.stroke();
-    ctx.fillStyle='#9db4d4'; ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
+    ctx.fillStyle=cssv('--muted'); ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
@@ -551,7 +562,7 @@ function drawChart(){
     const x=X(p.p);
     ctx.strokeStyle='rgba(255,180,0,.18)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
-    ctx.fillStyle='#6b86ad'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
+    ctx.fillStyle=cssv('--dim'); ctx.font='700 11px "BIZ UDGothic", sans-serif';
     const w=ctx.measureText(p.label).width;
     ctx.fillText(p.label, Math.min(W-padR-w, Math.max(padL, x-w/2)), H-8);
   });
@@ -617,7 +628,7 @@ function drawChart(){
   const last=pts[pts.length-1];
   ctx.fillStyle='#ffb400';
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),5,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#07142b';
+  ctx.fillStyle=cssv('--ink');
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),2,0,Math.PI*2); ctx.fill();
 
   pts.forEach(p=>{
@@ -642,11 +653,11 @@ function drawChart(){
     const bh=lines.length*17+10;
     let bx=Math.min(W-padR-bw, Math.max(padL, hx-bw/2));
     let by=hy-bh-14; if(by<padT) by=hy+14;
-    ctx.fillStyle='rgba(7,20,43,.96)'; ctx.fillRect(bx,by,bw,bh);
-    ctx.strokeStyle='#22406f'; ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
+    ctx.fillStyle=cssv('--ink'); ctx.globalAlpha=.96; ctx.fillRect(bx,by,bw,bh); ctx.globalAlpha=1;
+    ctx.strokeStyle=cssv('--line'); ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
     ctx.textBaseline='middle';
     lines.forEach((l,i)=>{
-      ctx.fillStyle = i===0 ? '#ffb400' : '#9db4d4';
+      ctx.fillStyle = i===0 ? cssv('--amber') : cssv('--muted');
       ctx.fillText(l, bx+8, by+16+i*17);
     });
     ctx.textBaseline='alphabetic';
@@ -700,14 +711,38 @@ function nextBand(temp){
   for(const b of bs) if(b.t>temp) return b;
   return null;
 }
+function hex2rgb(h){
+  const m=/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i.exec(h||'');
+  return m?[parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)]:[7,20,43];
+}
+const rgbs = a => 'rgb('+a.join(',')+')';
+// 白へ寄せる（0〜1）
+function lighten(rgb,t){ return rgb.map(v=>Math.round(v+(255-v)*t)); }
+function lum(rgb){ return (rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114)/255; }
+
 let bgNow='';
+// 区分の色から、画面全体の配色を作る
 function applyBg(temp){
-  const b = cfg.bgOn && isFinite(temp) ? bandOf(temp) : {c:'#07142b'};
+  const b = cfg.bgOn && isFinite(temp) ? bandOf(temp) : BANDS_DEFAULT[0];
   if(b.c===bgNow) return;                     // 区分が変わったときだけ切り替える
   bgNow=b.c;
-  document.documentElement.style.setProperty('--kbg', b.c);
-  document.body.style.background=b.c;
+  const base=hex2rgb(b.c);
+  const dark=lum(base)<0.5;
+  const r=document.documentElement.style;
+  r.setProperty('--ink',   rgbs(base));
+  r.setProperty('--panel', rgbs(lighten(base, dark?0.07:-0.0)));
+  r.setProperty('--panel2',rgbs(lighten(base, dark?0.12:-0.0)));
+  r.setProperty('--line',  rgbs(lighten(base, dark?0.22:-0.0)));
+  r.setProperty('--text',  dark?'#f2f6fb':'#10161f');
+  r.setProperty('--muted', rgbs(lighten(base, dark?0.55:-0.0)));
+  r.setProperty('--dim',   rgbs(lighten(base, dark?0.38:-0.0)));
+  r.setProperty('--kbg',   rgbs(base));
+  document.body.style.background=rgbs(base);
+  // 配色が変わったらグラフも描き直す
+  setTimeout(()=>{ drawChart(); drawSpark(); }, 60);
 }
+// CSS変数を読む（グラフの色を配色に追従させる）
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 
 // しきい値の一覧を設定画面に描く
 function drawBandRows(){
@@ -886,9 +921,9 @@ $('btnFull').onclick=()=>{
   else document.documentElement.requestFullscreen().catch(()=>{});
 };
 $('btnSettings').onclick=()=>{
-  const c=$('setCard');
-  const show = c.style.display!=='block';
-  c.style.display = show?'block':'none';
+  const ov=$('setOverlay');
+  const show = !ov.classList.contains('on');
+  ov.classList.toggle('on', show);
   if(show){
     $('url').value=endpoint();
     $('thHi').value=cfg.hi===null?'':cfg.hi;
@@ -942,7 +977,7 @@ document.addEventListener('keydown', e=>{
   if(k==='r'){ load(); loadRange(); }
   else if(k==='f') $('btnFull').click();
   else if(k==='k') toggleKiosk();
-  else if(k==='escape') toggleKiosk(false);
+  else if(k==='escape'){ toggleKiosk(false); $('setOverlay').classList.remove('on'); }
   else if(k>='1'&&k<='6'){
     const b=document.querySelectorAll('.tabs button[data-min]')[Number(k)-1];
     if(b) b.click();
