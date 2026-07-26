@@ -11,7 +11,9 @@
 <style>
   :root{
     --ink:#07142b; --panel:#050e1d; --panel2:#040b17; --line:#22406f;
-    --text:#f2f6fb; --muted:#9db4d4; --dim:#6b86ad;
+    --text:#f2f6fb;
+    /* ラベルなども現在値と同じ色にする */
+    --muted:#f2f6fb; --dim:#f2f6fb;
     --green:#4bc26a; --amber:#ffb400; --blue:#4fa8e8; --red:#e8503a;
     /* 本文はプロポーショナル、数値は等幅のUDフォント */
     --ja:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
@@ -35,7 +37,7 @@
   .dot.live{background:var(--green);box-shadow:0 0 10px rgba(75,194,106,.9)}
   .dot.warn{background:var(--amber)} .dot.dead{background:var(--red)}
   .spacer{flex:1}
-  header .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  header .meta{font-family:var(--mono);font-size:11px;color:var(--muted);opacity:.75}
   header button{text-shadow:none;background:#20302a;color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit}
   header button:hover{background:#2a3f37}
@@ -55,7 +57,7 @@
   .col{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px;
     transition:background 1.2s ease,border-color 1.2s ease}
-  .card h2{font-size:12px;letter-spacing:.14em;color:var(--muted);margin:0 0 10px;font-weight:700}
+  .card h2{font-size:12px;letter-spacing:.14em;color:var(--muted);opacity:.75;margin:0 0 10px;font-weight:700}
 
   /* 現在値 */
   .big{font-family:var(--num);font-size:clamp(48px,4.4vw,68px);font-weight:700;line-height:1;
@@ -63,8 +65,10 @@
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
   .big.normal{color:#ffffff}
   .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
-  .trend{text-align:center;font-family:var(--num);font-size:13px;font-weight:700;color:var(--muted);margin-top:7px}
-  .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
+  .trend{text-align:center;font-family:var(--num);font-size:13px;font-weight:700;
+    color:var(--muted);margin-top:7px;display:flex;align-items:baseline;justify-content:center}
+  .trend.up{color:var(--amber)} .trend.down{color:var(--blue)} .trend.flat{color:var(--muted)}
+  .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);opacity:.6;margin-top:6px}
 
   .kv{display:flex;justify-content:space-between;align-items:baseline;
     padding:6px 0;border-bottom:1px solid rgba(43,55,51,.6);font-size:12px}
@@ -90,13 +94,13 @@
   .tablewrap{flex:1;min-height:0;display:flex;flex-direction:column}
   .scroll{overflow:auto;flex:1;min-height:0}
   table{width:100%;border-collapse:collapse;font-family:var(--num);font-size:15px;font-weight:700}
-  thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);
+  thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);opacity:.8;
     transition:background 1.2s ease;
     font-size:12px;font-weight:700;letter-spacing:.06em;padding:9px 10px;text-align:right;
     border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:first-child{text-align:left}
   tbody td{padding:6px 10px;text-align:right;border-bottom:1px solid rgba(43,55,51,.35)}
-  tbody td:first-child{text-align:left;color:var(--muted);font-weight:500}
+  tbody td:first-child{text-align:left;color:var(--muted);opacity:.78;font-weight:500}
   tbody tr:hover{background:rgba(255,255,255,.04)}
   tbody tr.ten td:first-child{color:var(--amber);font-weight:700}
   tbody tr.ten{background:rgba(255,180,0,.10)}
@@ -129,7 +133,8 @@
   .col.left .card{padding:11px 13px}
   .nowCard{padding:10px 13px 12px !important}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:7px 12px}
-  .grid2 .g span{display:block;font-size:10px;color:var(--muted);letter-spacing:.04em;margin-bottom:2px}
+  .grid2 .g span{display:block;font-size:10px;color:var(--muted);opacity:.72;
+    letter-spacing:.04em;margin-bottom:2px}
   .grid2 .g b{font-family:var(--num);font-size:16px;font-weight:700;line-height:1;
     display:inline-flex;align-items:baseline}
 
@@ -141,16 +146,16 @@
   .ladderCard{flex:1;display:flex;flex-direction:column;min-height:120px}
   .ladderNow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
   .ladderNow b{font-size:19px;font-weight:700}
-  .ladderNow .nextWrap{font-size:11px;color:var(--muted);font-family:var(--num);
+  .ladderNow .nextWrap{font-size:11px;color:var(--muted);opacity:.75;font-family:var(--num);
     display:inline-flex;align-items:baseline}
   #ladder{display:flex;flex-direction:column;gap:4px;flex:1;min-height:0}
   .rung{position:relative;overflow:hidden;flex:1;display:flex;align-items:center;gap:8px;
-    padding:4px 8px;border-radius:5px;font-size:11px;color:var(--dim);
+    padding:4px 8px;border-radius:5px;font-size:11px;color:var(--dim);opacity:.6;
     border:1px solid transparent;transition:background .6s ease,color .6s ease}
   .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(255,255,255,.18)}
   .rung span{flex:1}
   .rung b{font-family:var(--num);font-size:12px;font-weight:700}
-  .rung.on{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--text)}
+  .rung.on{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--text);opacity:1}
   .rung i,.rung span,.rung b{position:relative;z-index:1}
   .rung .fill{position:absolute;left:0;top:0;bottom:0;z-index:0;
     background:rgba(255,255,255,.10);transition:width .8s ease}
@@ -385,8 +390,16 @@ function render(){
     const diff=m[0].avg-m[10].avg;
     const ar=diff>0.05?'▲':diff<-0.05?'▼':'→';
     const c=diff>0.05?'up':diff<-0.05?'down':'flat';
-    $('trend').innerHTML='<span class="'+c+'">'+ar+' 10分で '+(diff>=0?'+':'')+diff.toFixed(1)+'°C</span>';
-  } else $('trend').textContent='';
+    const tr=$('trend');
+    if(!tr._built){
+      tr.innerHTML='<span id="trArrow"></span><span id="trText"> 10分で </span>'
+                 + '<span id="trVal"></span><span id="trUnit">°C</span>';
+      tr._built=true;
+    }
+    tr.className='trend '+c;
+    $('trArrow').textContent=ar;
+    setVal($('trVal'), (diff>=0?'+':'')+diff.toFixed(1));
+  } else { $('trend').textContent=''; $('trend')._built=false; }
 
   setVal($('allMax'), f1(d.allMax));
   setVal($('allMin'), f1(d.allMin));
@@ -403,7 +416,7 @@ function render(){
     setVal($('h1avg'), mean.toFixed(2));
     setVal($('h1range'), (mx-mn).toFixed(1));
     setVal($('h1gap'), gaps+' / '+m.length);
-    $('h1gap').className=gaps?'bad':'';
+    $('h1gap').classList.toggle('bad', gaps>0);
   }
   applyBg(d.temp);
   drawLadder(d.temp);
@@ -556,7 +569,8 @@ function drawChart(){
     const y=Y(v);
     ctx.strokeStyle=cssv('--line'); ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(padL,Math.round(y)+.5); ctx.lineTo(W-padR,Math.round(y)+.5); ctx.stroke();
-    ctx.fillStyle=cssv('--muted'); ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
+    ctx.fillStyle=cssv('--muted'); ctx.globalAlpha=.8;
+    ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y); ctx.globalAlpha=1;
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
@@ -581,9 +595,11 @@ function drawChart(){
     const x=X(p.p);
     ctx.strokeStyle='rgba(255,180,0,.18)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
-    ctx.fillStyle=cssv('--dim'); ctx.font='700 11px "BIZ UDGothic", sans-serif';
+    ctx.fillStyle=cssv('--dim'); ctx.globalAlpha=.7;
+    ctx.font='700 11px "BIZ UDGothic", sans-serif';
     const w=ctx.measureText(p.label).width;
     ctx.fillText(p.label, Math.min(W-padR-w, Math.max(padL, x-w/2)), H-8);
+    ctx.globalAlpha=1;
   });
 
   [[cfg.hi,'#ffb400'],[cfg.lo,'#4fa8e8']].forEach(function(z){
@@ -768,6 +784,7 @@ function odoBuild(el, text){
 function odoSet(el, text, dir, ms){
   if(!el) return;
   if(!el._slots || el._text===undefined || el._text.length!==text.length
+     || !el.classList.contains('odo')          // クラスが外されていたら作り直す
      || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
     odoBuild(el, text); return;
   }
