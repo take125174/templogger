@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' fill='%230d1210'/%3E%3Ctext x='90' y='120' font-size='84' font-family='monospace' font-weight='700' fill='%2333c76e' text-anchor='middle'%3E%C2%B0C%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDGothic:wght@400;700&family=Roboto:wght@400;700&display=swap" rel="stylesheet">
 <title>いまの気温</title>
 <style>
   :root{
@@ -20,7 +20,7 @@
     --text:#dfe6e1; --muted:#7e8d86;
     --green:#33c76e; --amber:#e8b230; --blue:#6fb3d9; --red:#d9634a;
     --ja:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
-    --num:"BIZ UDGothic","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI",monospace;
+    --num:"Roboto","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI",monospace;
     --mono:var(--num);
   }
   *{box-sizing:border-box}
@@ -400,7 +400,7 @@ function drawChart(d){
   const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
   chartMap={X,Y,lo,hi,padL,padR,padT,padB,W,H,total:ser.total};
 
-  ctx.font='700 10px "BIZ UDGothic", monospace'; ctx.textBaseline='middle';
+  ctx.font='700 10px "Roboto","BIZ UDPGothic",sans-serif'; ctx.textBaseline='middle';
   for(let v=lo; v<=hi+step*1e-6; v+=step){
     const y=Y(v);
     ctx.strokeStyle='#2b3733'; ctx.lineWidth=1;
@@ -418,7 +418,7 @@ function drawChart(d){
     ctx.beginPath(); ctx.moveTo(x0,padT); ctx.lineTo(x0,H-padB);
     ctx.moveTo(x1,padT); ctx.lineTo(x1,H-padB); ctx.stroke(); ctx.setLineDash([]);
     if(x1-x0>30){
-      ctx.fillStyle='#d9634a'; ctx.font='700 9px "BIZ UDGothic", monospace';
+      ctx.fillStyle='#d9634a'; ctx.font='700 9px "Roboto","BIZ UDPGothic",sans-serif';
       const t='欠測'+g.minutes+'分';
       ctx.fillText(t,(x0+x1)/2-ctx.measureText(t).width/2, padT+9);
     }
@@ -462,7 +462,7 @@ function drawChart(d){
   ctx.fillStyle='#33c76e';
   ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),3.5,0,Math.PI*2); ctx.fill();
 
-  ctx.fillStyle='#7e8d86'; ctx.font='700 10px "BIZ UDGothic", monospace';
+  ctx.fillStyle='#7e8d86'; ctx.font='700 10px "Roboto","BIZ UDPGothic",sans-serif';
   ctx.fillText(pts[0].label,padL,H-4);
   ctx.fillText(last.label, W-padR-ctx.measureText(last.label).width, H-4);
 
@@ -475,7 +475,7 @@ function drawChart(d){
 
     const l1=p.label+'  '+fmt(p.avg)+'\u00b0C';
     const l2='最高 '+fmt(p.max)+'  最低 '+fmt(p.min)+((p.cnt||0)<6?'  一部欠測':'');
-    ctx.font='700 12px "BIZ UDGothic", monospace';
+    ctx.font='700 12px "Roboto","BIZ UDPGothic",sans-serif';
     const bw=Math.max(ctx.measureText(l1).width, ctx.measureText(l2).width)+12;
     const bh=34;
     let bx=Math.max(padL, Math.min(W-padR-bw, hx-bw/2));
@@ -489,7 +489,7 @@ function drawChart(d){
     ctx.fillStyle='#dfe6e1'; ctx.fillText(l1, bx+6, by+11);
     ctx.fillStyle='#7e8d86'; ctx.fillText(l2, bx+6, by+25);
     ctx.textBaseline='alphabetic';
-    ctx.font='700 10px "BIZ UDGothic", monospace';
+    ctx.font='700 10px "Roboto","BIZ UDPGothic",sans-serif';
   }
 }
 
