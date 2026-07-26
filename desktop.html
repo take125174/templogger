@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>気温モニター</title>
+<style>
+  :root{
+    --ink:#0d1210; --panel:#161d1a; --panel2:#1b2420; --line:#2b3733;
+    --text:#dfe6e1; --muted:#7e8d86; --dim:#55625c;
+    --green:#33c76e; --amber:#e8b230; --blue:#6fb3d9; --red:#d9634a;
+    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:var(--ink);color:var(--text);
+    font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    display:flex;flex-direction:column;overflow:hidden}
+
+  /* 上部バー */
+  header{display:flex;align-items:center;gap:16px;padding:10px 18px;
+    border-bottom:1px solid var(--line);background:var(--panel);flex:none}
+  header h1{font-size:13px;font-weight:600;letter-spacing:.14em;margin:0;text-transform:uppercase}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+  .dot.live{background:var(--green);box-shadow:0 0 8px rgba(51,199,110,.7)}
+  .dot.warn{background:var(--amber)} .dot.dead{background:var(--red)}
+  .spacer{flex:1}
+  header .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
+  header button{background:#20302a;color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+  header button:hover{background:#2a3f37}
+
+  main{flex:1;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;overflow:hidden}
+  @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
+
+  .col{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{font-size:10px;letter-spacing:.16em;color:var(--muted);margin:0 0 10px;
+    text-transform:uppercase;font-weight:600}
+
+  /* 現在値 */
+  .big{font-family:var(--mono);font-size:64px;font-weight:700;line-height:1;color:var(--green);
+    text-align:center;letter-spacing:-.02em}
+  .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
+  .big small{font-size:22px;color:var(--muted);margin-left:4px}
+  .trend{text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:8px}
+  .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
+
+  .kv{display:flex;justify-content:space-between;align-items:baseline;
+    padding:6px 0;border-bottom:1px solid rgba(43,55,51,.6);font-size:12px}
+  .kv:last-child{border-bottom:none}
+  .kv span{color:var(--muted)}
+  .kv b{font-family:var(--mono);font-size:15px;font-weight:700}
+
+  /* グラフ */
+  .chartwrap{flex:none;display:flex;flex-direction:column}
+  .tabs{display:flex;gap:6px;margin-bottom:10px}
+  .tabs button{background:transparent;color:var(--muted);border:1px solid var(--line);
+    border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+  .tabs button.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+  #chart{width:100%;height:300px;display:block;cursor:crosshair}
+
+  /* 表 */
+  .tablewrap{flex:1;min-height:0;display:flex;flex-direction:column}
+  .scroll{overflow:auto;flex:1;min-height:0}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+  thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);
+    font-size:10px;font-weight:600;letter-spacing:.08em;padding:8px 10px;text-align:right;
+    border-bottom:1px solid var(--line);white-space:nowrap}
+  thead th:first-child{text-align:left}
+  tbody td{padding:6px 10px;text-align:right;border-bottom:1px solid rgba(43,55,51,.35)}
+  tbody td:first-child{text-align:left;color:var(--muted)}
+  tbody tr:hover{background:rgba(255,255,255,.04)}
+  tbody tr.ten td:first-child{color:var(--green);font-weight:700}
+  tbody tr.ten{background:rgba(51,199,110,.09)}
+  tbody tr.sel{outline:1px solid var(--amber);outline-offset:-1px}
+  .hi{color:var(--amber)} .lo{color:var(--blue)}
+  .up{color:var(--amber)} .down{color:var(--blue)} .flat{color:var(--dim)}
+  .bad{color:var(--red)}
+
+  .banner{border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.6;display:none}
+  .banner b{display:block;font-size:14px;margin-bottom:2px}
+  .banner.hot{background:#3a2a12;border:1px solid #7a5a20;color:#f5d489}
+  .banner.cold{background:#12283a;border:1px solid #2a5a7a;color:#a9d4ef}
+  .banner.dead{background:#3a1f1a;border:1px solid #7a3a32;color:#f3c4bb}
+
+  .field{display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px;color:var(--muted)}
+  .field label{flex:1}
+  .field input{width:82px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:6px;font-family:var(--mono);font-size:13px;text-align:center}
+  .field input.wide{width:100%;text-align:left;font-size:11px}
+  .btnrow{display:flex;gap:8px;margin-top:10px}
+  .btnrow button{flex:1;background:#20302a;color:var(--text);border:1px solid var(--line);
+    border-radius:6px;padding:8px;font-size:12px;cursor:pointer;font-family:inherit}
+  .btnrow button.go{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+  .msg{color:var(--muted);font-size:13px;text-align:center;padding:40px 0;line-height:1.9}
+  .err{color:var(--red);font-size:11px;word-break:break-all}
+  .hint{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.7}
+  kbd{background:#20302a;border:1px solid var(--line);border-radius:3px;padding:1px 5px;
+    font-family:var(--mono);font-size:10px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="dot" id="dot"></div>
+  <h1>気温モニター</h1>
+  <div class="meta" id="hdrMeta">—</div>
+  <div class="spacer"></div>
+  <div class="meta" id="countdown"></div>
+  <button id="btnRefresh">更新</button>
+  <button id="btnCsv">CSV</button>
+  <button id="btnFull">全画面</button>
+  <button id="btnSettings">設定</button>
+</header>
+
+<main>
+  <div class="col">
+    <div class="banner" id="alert"></div>
+
+    <div class="card">
+      <div class="big" id="big">--.-<small>°C</small></div>
+      <div class="trend" id="trend"></div>
+      <div class="at" id="at"></div>
+    </div>
+
+    <div class="card">
+      <h2>全期間</h2>
+      <div class="kv"><span>最高</span><b class="hi" id="allMax">-</b></div>
+      <div class="kv"><span>最低</span><b class="lo" id="allMin">-</b></div>
+      <div class="kv"><span>10秒値</span><b id="cnt">-</b></div>
+      <div class="kv"><span>生データ</span><b id="rawCnt">-</b></div>
+    </div>
+
+    <div class="card">
+      <h2>直近1時間</h2>
+      <div class="kv"><span>最高</span><b class="hi" id="h1max">-</b></div>
+      <div class="kv"><span>最低</span><b class="lo" id="h1min">-</b></div>
+      <div class="kv"><span>平均</span><b id="h1avg">-</b></div>
+      <div class="kv"><span>変動幅</span><b id="h1range">-</b></div>
+      <div class="kv"><span>標準偏差</span><b id="h1sd">-</b></div>
+      <div class="kv"><span>欠測のある分</span><b id="h1gap">-</b></div>
+    </div>
+
+    <div class="card" id="setCard" style="display:none">
+      <h2>設定</h2>
+      <div class="field"><label>接続先</label></div>
+      <div class="field"><input class="wide" id="url" placeholder="…/exec"></div>
+      <div class="field"><label>高温アラート</label><input id="thHi" placeholder="35.0"></div>
+      <div class="field"><label>低温アラート</label><input id="thLo" placeholder="20.0"></div>
+      <div class="field"><label>停止とみなす分</label><input id="deadMin" placeholder="5"></div>
+      <div class="field"><label>更新間隔（秒）</label><input id="pollSec" placeholder="5"></div>
+      <div class="btnrow">
+        <button id="btnNotify">通知を許可</button>
+        <button class="go" id="btnSave">保存</button>
+      </div>
+      <div class="hint">
+        <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 表示期間
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card chartwrap">
+      <div class="tabs">
+        <button data-min="10">10分</button>
+        <button data-min="30">30分</button>
+        <button data-min="60" class="on">60分</button>
+        <div class="spacer"></div>
+      </div>
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="card tablewrap">
+      <h2>1分ごと（確定値）</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr>
+            <th>時刻</th><th>最高</th><th>最低</th><th>気温</th><th>前分比</th><th>10秒値</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="empty" class="msg" style="display:none"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const K_URL='templogger:viewUrl', K_SET='templogger:alerts';
+let cfg={hi:null, lo:null, deadMin:5, pollSec:5};
+try{ Object.assign(cfg, JSON.parse(localStorage.getItem(K_SET)||'{}')); }catch(e){}
+
+let data=null, spanMin=60, hover=null, pollTimer=null, nextAt=0;
+
+function endpoint(){
+  const u=new URL(location.href);
+  return u.searchParams.get('url') || localStorage.getItem(K_URL) || '';
+}
+const f1 = v => (Math.round(v*10)/10).toFixed(1);
+
+/* ---------- 取得 ---------- */
+async function load(){
+  const url=endpoint();
+  if(!url){ $('setCard').style.display='block'; $('hdrMeta').textContent='接続先が未設定'; return; }
+  try{
+    const sep=url.includes('?')?'&':'?';
+    const res=await fetch(url+sep+'format=json&_='+Date.now());
+    const d=await res.json();
+    if(!d.ok) throw new Error(d.error||'応答が不正');
+    if(d.empty){ $('hdrMeta').textContent='まだ記録がありません'; setDot('warn'); return; }
+    data=d; render();
+  }catch(e){
+    $('hdrMeta').innerHTML='<span class="err">読み込めません: '+String(e)+'</span>';
+    setDot('dead');
+  }
+  nextAt=Date.now()+Math.max(2,cfg.pollSec)*1000;
+}
+function setDot(c){ $('dot').className='dot'+(c?' '+c:''); }
+
+/* ---------- 描画 ---------- */
+function render(){
+  const d=data;
+  const state=checkAlert(d);
+  const stale=d.ageSec>600;
+  setDot(state==='dead'?'dead' : state?'warn' : (stale?'warn':'live'));
+
+  let cls='big';
+  if(state==='hot') cls+=' hot'; else if(state==='cold') cls+=' cold'; else if(stale) cls+=' stale';
+  $('big').className=cls;
+  $('big').innerHTML=f1(d.temp)+'<small>°C</small>';
+  $('at').textContent=d.at+'　'+d.ageSec+'秒前';
+  $('hdrMeta').textContent='最終記録 '+d.at;
+
+  const m=d.minutes||[];
+  if(m.length>=11){
+    const diff=m[0].avg-m[10].avg;
+    const ar=diff>0.05?'▲':diff<-0.05?'▼':'→';
+    const c=diff>0.05?'up':diff<-0.05?'down':'flat';
+    $('trend').innerHTML='<span class="'+c+'">'+ar+' 10分で '+(diff>=0?'+':'')+diff.toFixed(1)+'°C</span>';
+  } else $('trend').textContent='';
+
+  $('allMax').textContent=f1(d.allMax);
+  $('allMin').textContent=f1(d.allMin);
+  $('cnt').textContent=(d.count||0).toLocaleString();
+  $('rawCnt').textContent=(d.rawCount||0).toLocaleString();
+
+  // 直近1時間の統計
+  if(m.length){
+    const avgs=m.map(x=>x.avg);
+    const mx=Math.max(...m.map(x=>x.max)), mn=Math.min(...m.map(x=>x.min));
+    const mean=avgs.reduce((a,b)=>a+b,0)/avgs.length;
+    const sd=Math.sqrt(avgs.reduce((a,b)=>a+(b-mean)*(b-mean),0)/avgs.length);
+    const gaps=m.filter(x=>(x.cnt||0)<6).length;
+    $('h1max').textContent=f1(mx); $('h1min').textContent=f1(mn);
+    $('h1avg').textContent=mean.toFixed(2);
+    $('h1range').textContent=(mx-mn).toFixed(1);
+    $('h1sd').textContent=sd.toFixed(3);
+    $('h1gap').textContent=gaps+' / '+m.length;
+    $('h1gap').className=gaps?'bad':'';
+  }
+  drawChart();
+  drawTable();
+}
+
+function checkAlert(d){
+  const el=$('alert');
+  let state='', html='';
+  if(cfg.deadMin>0 && d.ageSec>cfg.deadMin*60){
+    state='dead';
+    html='<b>記録が止まっています</b>最後の記録から'+Math.round(d.ageSec/60)+'分経過';
+  } else if(cfg.hi!==null && d.temp>=cfg.hi){
+    state='hot'; html='<b>高温</b>'+f1(d.temp)+'°C（しきい値 '+f1(cfg.hi)+'°C 以上）';
+  } else if(cfg.lo!==null && d.temp<=cfg.lo){
+    state='cold'; html='<b>低温</b>'+f1(d.temp)+'°C（しきい値 '+f1(cfg.lo)+'°C 以下）';
+  }
+  if(state){ el.className='banner '+state; el.innerHTML=html; el.style.display='block'; }
+  else el.style.display='none';
+  return state;
+}
+
+/* ---------- グラフ ---------- */
+function niceStep(range,target){
+  const raw=range/target, mag=Math.pow(10,Math.floor(Math.log10(raw))), n=raw/mag;
+  return (n<=1?1:n<=2?2:n<=5?5:10)*mag;
+}
+let cmap=null;
+function drawChart(){
+  const cv=$('chart'), ctx=cv.getContext('2d');
+  const dpr=window.devicePixelRatio||1;
+  const W=cv.clientWidth, H=cv.clientHeight||300;
+  cv.width=W*dpr; cv.height=H*dpr;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,W,H);
+  const all=(data&&data.minutes)?data.minutes:[];
+  const pts=all.slice(0,spanMin).reverse();
+  if(pts.length<2){ cmap=null; return; }
+
+  let mn=Math.min(...pts.map(p=>p.min)), mx=Math.max(...pts.map(p=>p.max));
+  if(cfg.hi!==null && cfg.hi<mx+4) mx=Math.max(mx,cfg.hi);
+  if(cfg.lo!==null && cfg.lo>mn-4) mn=Math.min(mn,cfg.lo);
+  const span=(mx-mn)||0.4;
+  const step=niceStep(span*1.2,5);
+  const lo=Math.floor((mn-span*0.08)/step)*step;
+  const hi=Math.ceil((mx+span*0.08)/step)*step;
+  const dec=Math.max(0,-Math.floor(Math.log10(step)));
+  const padL=48,padR=14,padT=14,padB=26;
+  const X=i=>padL+(W-padL-padR)*(i/(pts.length-1));
+  const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
+  cmap={X,Y,pts,padL,padR,W,H,padT,padB};
+
+  ctx.font='10px '+getComputedStyle(document.body).getPropertyValue('--mono');
+  ctx.textBaseline='middle';
+  for(let v=lo; v<=hi+step*1e-6; v+=step){
+    const y=Y(v);
+    ctx.strokeStyle='#232e2a'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(padL,Math.round(y)+.5); ctx.lineTo(W-padR,Math.round(y)+.5); ctx.stroke();
+    ctx.fillStyle='#7e8d86'; ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
+  }
+  ctx.textAlign='left'; ctx.textBaseline='alphabetic';
+
+  // 縦の目盛り（10分ごと）
+  pts.forEach((p,i)=>{
+    if(!(p.tenMin || Number((p.label||'').split(':')[1])%10===0)) return;
+    const x=X(i);
+    ctx.strokeStyle='rgba(51,199,110,.16)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
+    ctx.fillStyle='#55625c'; ctx.font='10px monospace';
+    ctx.fillText(p.label, x-16, H-8);
+  });
+
+  // しきい値
+  [[cfg.hi,'#e8b230'],[cfg.lo,'#6fb3d9']].forEach(function(z){
+    if(z[0]===null||z[0]<lo||z[0]>hi) return;
+    const y=Y(z[0]);
+    ctx.strokeStyle=z[1]; ctx.lineWidth=1; ctx.setLineDash([5,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.setLineDash([]);
+  });
+
+  // 最高〜最低の帯
+  ctx.fillStyle='rgba(51,199,110,.15)';
+  ctx.beginPath();
+  pts.forEach((p,i)=>{const x=X(i),y=Y(p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  for(let i=pts.length-1;i>=0;i--) ctx.lineTo(X(i),Y(pts[i].min));
+  ctx.closePath(); ctx.fill();
+
+  // 平均線
+  ctx.strokeStyle='#33c76e'; ctx.lineWidth=2; ctx.lineJoin='round';
+  ctx.beginPath();
+  pts.forEach((p,i)=>{const x=X(i),y=Y(p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.stroke();
+
+  // 欠測のある分に印
+  pts.forEach((p,i)=>{
+    if((p.cnt||0)>=6) return;
+    ctx.fillStyle='#d9634a';
+    ctx.beginPath(); ctx.arc(X(i),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
+  });
+
+  const last=pts[pts.length-1];
+  ctx.fillStyle='#33c76e';
+  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),4,0,Math.PI*2); ctx.fill();
+
+  // 触っている位置
+  if(hover!==null && hover>=0 && hover<pts.length){
+    const p=pts[hover], hx=X(hover), hy=Y(p.avg);
+    ctx.strokeStyle='rgba(232,178,48,.85)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,H-padB); ctx.stroke();
+    ctx.fillStyle='#e8b230';
+    ctx.beginPath(); ctx.arc(hx,hy,4.5,0,Math.PI*2); ctx.fill();
+    const lines=[p.label+'　'+f1(p.avg)+'°C',
+                 '最高 '+f1(p.max)+'　最低 '+f1(p.min),
+                 '10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（欠測）':'')];
+    ctx.font='12px '+getComputedStyle(document.body).getPropertyValue('--mono');
+    const bw=Math.max(...lines.map(l=>ctx.measureText(l).width))+16;
+    const bh=lines.length*17+10;
+    let bx=Math.min(W-padR-bw, Math.max(padL, hx-bw/2));
+    let by=hy-bh-14; if(by<padT) by=hy+14;
+    ctx.fillStyle='rgba(11,15,13,.95)'; ctx.fillRect(bx,by,bw,bh);
+    ctx.strokeStyle='#2b3733'; ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
+    ctx.textBaseline='middle';
+    lines.forEach((l,i)=>{
+      ctx.fillStyle = i===0 ? '#dfe6e1' : '#7e8d86';
+      ctx.fillText(l, bx+8, by+16+i*17);
+    });
+    ctx.textBaseline='alphabetic';
+  }
+}
+
+/* ---------- 表 ---------- */
+function drawTable(){
+  const m=(data&&data.minutes)?data.minutes:[];
+  const rows=m.map((x,i)=>{
+    const prev=m[i+1];
+    let delta='—', dcls='flat';
+    if(prev){
+      const dv=x.avg-prev.avg;
+      delta=(dv>=0?'+':'')+dv.toFixed(1);
+      dcls = dv>0.05?'up' : dv<-0.05?'down' : 'flat';
+      if(Math.abs(dv)<0.05) delta='±0.0';
+    }
+    const ten = x.tenMin || Number((x.label||'').split(':')[1])%10===0;
+    const q=x.cnt||0;
+    return '<tr class="'+(ten?'ten':'')+'" data-i="'+i+'">'
+      + '<td>'+x.label+'</td>'
+      + '<td class="hi">'+f1(x.max)+'</td>'
+      + '<td class="lo">'+f1(x.min)+'</td>'
+      + '<td>'+f1(x.avg)+'</td>'
+      + '<td class="'+dcls+'">'+delta+'</td>'
+      + '<td class="'+(q<6?'bad':'')+'">'+q+'</td></tr>';
+  }).join('');
+  $('tbody').innerHTML=rows;
+}
+
+/* ---------- 操作 ---------- */
+$('chart').addEventListener('mousemove', e=>{
+  if(!cmap) return;
+  const r=$('chart').getBoundingClientRect();
+  const x=e.clientX-r.left;
+  const {padL,padR,W,pts}=cmap;
+  const frac=(x-padL)/Math.max(1,(W-padL-padR));
+  hover=Math.round(Math.min(1,Math.max(0,frac))*(pts.length-1));
+  drawChart();
+});
+$('chart').addEventListener('mouseleave', ()=>{ hover=null; drawChart(); });
+
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on'); spanMin=Number(b.dataset.min); hover=null; drawChart();
+  };
+});
+
+$('btnRefresh').onclick=load;
+$('btnFull').onclick=()=>{
+  if(document.fullscreenElement) document.exitFullscreen();
+  else document.documentElement.requestFullscreen().catch(()=>{});
+};
+$('btnSettings').onclick=()=>{
+  const c=$('setCard');
+  const show = c.style.display!=='block';
+  c.style.display = show?'block':'none';
+  if(show){
+    $('url').value=endpoint();
+    $('thHi').value=cfg.hi===null?'':cfg.hi;
+    $('thLo').value=cfg.lo===null?'':cfg.lo;
+    $('deadMin').value=cfg.deadMin;
+    $('pollSec').value=cfg.pollSec;
+  }
+};
+$('btnSave').onclick=()=>{
+  const u=$('url').value.trim();
+  if(u) localStorage.setItem(K_URL,u);
+  const num=v=>{const t=parseFloat(v); return isFinite(t)?t:null;};
+  cfg.hi=num($('thHi').value); cfg.lo=num($('thLo').value);
+  const dm=parseFloat($('deadMin').value); cfg.deadMin=isFinite(dm)?dm:0;
+  const ps=parseFloat($('pollSec').value); cfg.pollSec=isFinite(ps)&&ps>=2?ps:5;
+  localStorage.setItem(K_SET, JSON.stringify(cfg));
+  $('setCard').style.display='none';
+  restartPoll(); load();
+};
+$('btnNotify').onclick=async ()=>{
+  if(typeof Notification==='undefined'){ $('btnNotify').textContent='通知は使えません'; return; }
+  const p=await Notification.requestPermission();
+  $('btnNotify').textContent = p==='granted'?'通知は許可済み':'許可されませんでした';
+};
+$('btnCsv').onclick=()=>{
+  const m=(data&&data.minutes)?data.minutes:[];
+  if(!m.length) return;
+  let s='time,max,min,avg,ten_sec_values\n';
+  m.slice().reverse().forEach(x=>{
+    s+=x.label+','+f1(x.max)+','+f1(x.min)+','+f1(x.avg)+','+(x.cnt||0)+'\n';
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([s],{type:'text/csv'}));
+  a.download='temp_minutes_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+};
+
+document.addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT') return;
+  const k=e.key.toLowerCase();
+  if(k==='r') load();
+  else if(k==='f') $('btnFull').click();
+  else if(k==='1'||k==='2'||k==='3'){
+    const b=document.querySelectorAll('.tabs button')[Number(k)-1];
+    if(b) b.click();
+  }
+});
+
+function restartPoll(){
+  if(pollTimer) clearInterval(pollTimer);
+  pollTimer=setInterval(()=>{ if(!document.hidden) load(); }, Math.max(2,cfg.pollSec)*1000);
+}
+setInterval(()=>{
+  const left=Math.max(0, Math.ceil((nextAt-Date.now())/1000));
+  $('countdown').textContent='次の更新 '+left+'s';
+}, 500);
+window.addEventListener('resize', ()=>{ drawChart(); });
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
+
+load();
+restartPoll();
+</script>
+</body>
+</html>
