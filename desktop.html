@@ -10,7 +10,7 @@
 <title>気温モニター</title>
 <style>
   :root{
-    --ink:#07142b; --panel:#0e2145; --panel2:#132a53; --line:#22406f;
+    --ink:#07142b; --panel:#050e1d; --panel2:#040b17; --line:#22406f;
     --text:#f2f6fb; --muted:#9db4d4; --dim:#6b86ad;
     --green:#4bc26a; --amber:#ffb400; --blue:#4fa8e8; --red:#e8503a;
     /* 本文はプロポーショナル、数値は等幅のUDフォント */
@@ -21,6 +21,7 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{background:var(--ink);color:var(--text);transition:background 1.2s ease,color 1.2s ease;
+    text-shadow:0 1px 2px rgba(0,0,0,.45);
     font-family:var(--ja);font-feature-settings:"palt" 1;
     font-variant-numeric:tabular-nums;
     display:flex;flex-direction:column;overflow:hidden}
@@ -35,10 +36,11 @@
   .dot.warn{background:var(--amber)} .dot.dead{background:var(--red)}
   .spacer{flex:1}
   header .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
-  header button{background:#20302a;color:var(--text);border:1px solid var(--line);
+  header button{text-shadow:none;background:#20302a;color:var(--text);border:1px solid var(--line);
     border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit}
   header button:hover{background:#2a3f37}
 
+  input,select,button,option{text-shadow:none}
   main{flex:1;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;overflow:hidden}
   @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
 
@@ -49,7 +51,7 @@
 
   /* 現在値 */
   .big{font-family:var(--num);font-size:clamp(48px,4.4vw,68px);font-weight:700;line-height:1;
-    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 2px 12px rgba(0,0,0,.45)}
+    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 3px 14px rgba(0,0,0,.55)}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
   .big.normal{color:#ffffff}
   .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
@@ -131,13 +133,17 @@
   .ladderNow{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px}
   .ladderNow b{font-size:19px;font-weight:700}
   .ladderNow span{font-size:11px;color:var(--muted);font-family:var(--num)}
-  #ladder{display:flex;flex-direction:column;gap:4px;flex:1;justify-content:flex-end}
-  .rung{display:flex;align-items:center;gap:8px;padding:4px 8px;border-radius:5px;
-    font-size:11px;color:var(--dim);border:1px solid transparent}
+  #ladder{display:flex;flex-direction:column;gap:4px;flex:1;min-height:0}
+  .rung{position:relative;overflow:hidden;flex:1;display:flex;align-items:center;gap:8px;
+    padding:4px 8px;border-radius:5px;font-size:11px;color:var(--dim);
+    border:1px solid transparent;transition:background .6s ease,color .6s ease}
   .rung i{width:12px;height:12px;border-radius:3px;flex:none;border:1px solid rgba(255,255,255,.18)}
   .rung span{flex:1}
   .rung b{font-family:var(--num);font-size:12px;font-weight:700}
   .rung.on{background:rgba(255,255,255,.07);border-color:var(--line);color:var(--text)}
+  .rung i,.rung span,.rung b{position:relative;z-index:1}
+  .rung .fill{position:absolute;left:0;top:0;bottom:0;z-index:0;
+    background:rgba(255,255,255,.10);transition:width .8s ease}
   .rung.on b{color:var(--amber)}
   .err{color:var(--red);font-size:11px;word-break:break-all}
   .hint{font-size:10px;color:var(--dim);margin-top:10px;line-height:1.7}
@@ -151,7 +157,7 @@
   .kDate{font-family:var(--num);font-size:clamp(20px,2.4vw,34px);color:rgba(255,255,255,.75);
     letter-spacing:.04em}
   .kBadge{font-size:clamp(18px,2.2vw,30px);font-weight:700;padding:6px 20px;border-radius:999px;
-    background:rgba(255,255,255,.12);color:#fff;letter-spacing:.1em}
+    background:rgba(0,0,0,.28);color:#fff;letter-spacing:.1em;text-shadow:0 2px 6px rgba(0,0,0,.6)}
   .kMain{display:flex;align-items:center;gap:20px}
   .kBig{font-family:var(--num);font-size:clamp(120px,25vw,320px);font-weight:700;line-height:.95;
     color:#fff;letter-spacing:-.04em;text-shadow:0 6px 40px rgba(0,0,0,.45)}
@@ -162,7 +168,8 @@
   .kCards{display:flex;gap:clamp(18px,3.4vw,54px);margin-top:18px;flex-wrap:wrap;justify-content:center}
   .kCards div{text-align:center}
   .kCards span{display:block;font-size:clamp(11px,1.05vw,14px);color:rgba(255,255,255,.5);margin-bottom:5px}
-  .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:#fff}
+  .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:#fff;
+    text-shadow:0 2px 8px rgba(0,0,0,.5)}
   .kHint{position:absolute;bottom:20px;font-size:12px;color:rgba(255,255,255,.3)}
   @keyframes pulse{0%,100%{opacity:.85}50%{opacity:.35}}
   .kBadge.alert{animation:pulse 2.4s ease-in-out infinite}
@@ -718,6 +725,7 @@ function hex2rgb(h){
 const rgbs = a => 'rgb('+a.join(',')+')';
 // 白へ寄せる（0〜1）
 function lighten(rgb,t){ return rgb.map(v=>Math.round(v+(255-v)*t)); }
+function darken(rgb,t){ return rgb.map(v=>Math.round(v*(1-t))); }
 function lum(rgb){ return (rgb[0]*0.299+rgb[1]*0.587+rgb[2]*0.114)/255; }
 
 let bgNow='';
@@ -730,12 +738,12 @@ function applyBg(temp){
   const dark=lum(base)<0.5;
   const r=document.documentElement.style;
   r.setProperty('--ink',   rgbs(base));
-  r.setProperty('--panel', rgbs(lighten(base, dark?0.07:-0.0)));
-  r.setProperty('--panel2',rgbs(lighten(base, dark?0.12:-0.0)));
-  r.setProperty('--line',  rgbs(lighten(base, dark?0.22:-0.0)));
+  r.setProperty('--panel', rgbs(darken(base, 0.34)));   // 背景より少し暗く
+  r.setProperty('--panel2',rgbs(darken(base, 0.46)));
+  r.setProperty('--line',  rgbs(lighten(base, dark?0.20:0.0)));
   r.setProperty('--text',  dark?'#f2f6fb':'#10161f');
-  r.setProperty('--muted', rgbs(lighten(base, dark?0.55:-0.0)));
-  r.setProperty('--dim',   rgbs(lighten(base, dark?0.38:-0.0)));
+  r.setProperty('--muted', rgbs(lighten(base, dark?0.52:0.0)));
+  r.setProperty('--dim',   rgbs(lighten(base, dark?0.34:0.0)));
   r.setProperty('--kbg',   rgbs(base));
   document.body.style.background=rgbs(base);
   // 配色が変わったらグラフも描き直す
@@ -762,7 +770,15 @@ function drawLadder(temp){
   const bs=bands(), cur=bandOf(temp), nx=nextBand(temp);
   $('ladder').innerHTML=bs.slice().reverse().map(b=>{
     const on = b===cur;
-    return '<div class="rung'+(on?' on':'')+'">'
+    let fill='';
+    if(on){
+      // その区分の中でどこまで来ているかを帯で示す
+      const lowEdge = b.t>-90 ? b.t : (bs[1] ? bs[1].t-5 : temp-5);
+      const highEdge = nx ? nx.t : lowEdge+5;
+      const r=Math.max(0, Math.min(1, (temp-lowEdge)/((highEdge-lowEdge)||1)));
+      fill='<div class="fill" style="width:'+(r*100).toFixed(1)+'%"></div>';
+    }
+    return '<div class="rung'+(on?' on':'')+'">'+fill
       + '<i style="background:'+b.c+'"></i>'
       + '<span>'+b.name+'</span>'
       + '<b>'+(b.t>-90? b.t+'°C':'—')+'</b></div>';
@@ -867,6 +883,7 @@ function drawSpark(){
 
 setInterval(renderKiosk, 1000);
 $('kiosk').onclick=()=>toggleKiosk(false);
+$('setOverlay').onclick=e=>{ if(e.target===$('setOverlay')) $('setOverlay').classList.remove('on'); };
 
 /* ---------- 操作 ---------- */
 $('chart').addEventListener('mousemove', e=>{
@@ -944,8 +961,8 @@ $('btnSave').onclick=()=>{
   cfg.bgOn=$('bgOn').checked;
   localStorage.setItem(K_SET, JSON.stringify(cfg));
   bgNow=''; applyBg(data?data.temp:NaN);
-  $('setCard').style.display='none';
-  restartPoll(); load();
+  $('setOverlay').classList.remove('on');
+  restartPoll(); load(); loadRange();
 };
 $('btnBandReset').onclick=()=>{
   cfg.bands=BANDS_DEFAULT.map(b=>({...b}));
