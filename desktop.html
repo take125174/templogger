@@ -13,7 +13,7 @@
     --ink:#07142b; --panel:#0e2145; --panel2:#132a53; --line:#22406f;
     --text:#f2f6fb; --muted:#9db4d4; --dim:#6b86ad;
     --green:#4bc26a; --amber:#ffb400; --blue:#4fa8e8; --red:#e8503a;
-    /* 本文はプロポーショナルで数値は等幅のUDフォント */
+    /* 本文はプロポーショナル、数値は等幅のUDフォント */
     --ja:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
     --num:"BIZ UDGothic","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI",monospace;
     --mono:var(--num);
@@ -85,6 +85,8 @@
   .hi{color:var(--amber)} .lo{color:var(--blue)}
   .up{color:var(--amber)} .down{color:var(--blue)} .flat{color:var(--dim)}
   .bad{color:var(--red)}
+  tbody tr.gap td{text-align:center;color:var(--red);font-size:12px;font-weight:700;
+    background:rgba(232,80,58,.10);padding:5px 10px}
 
   .banner{border-radius:8px;padding:10px 14px;font-size:13px;line-height:1.6;display:none}
   .banner b{display:block;font-size:14px;margin-bottom:2px}
@@ -291,6 +293,37 @@ function checkAlert(d){
   return state;
 }
 
+
+/* ---------- 欠測を考慮した時系列の組み立て ---------- */
+// minutes は新しい順。ラベル HH:mm から実際の経過分を求める
+function buildSeries(minutes, spanMin){
+  const md = l => { const a=(l||'0:0').split(':'); return Number(a[0])*60+Number(a[1]); };
+  const asc = minutes.slice().reverse();          // 古い順
+  if(!asc.length) return {pts:[], gaps:[], total:0};
+  const pos=[0];
+  for(let i=1;i<asc.length;i++){
+    let dm=(md(asc[i].label)-md(asc[i-1].label)+1440)%1440;
+    if(dm===0) dm=1;                              // 同じ分が続く異常への保険
+    pos.push(pos[i-1]+dm);
+  }
+  const last=pos[pos.length-1];
+  // 直近 spanMin 分ぶんだけ残す
+  const from=last-spanMin+1;
+  const keep=[];
+  for(let i=0;i<asc.length;i++) if(pos[i]>=from) keep.push({m:asc[i], p:pos[i]});
+  if(keep.length<2) return {pts:keep, gaps:[], total:1};
+  const base=keep[0].p;
+  const pts=keep.map(k=>({...k.m, p:k.p-base}));
+  const total=pts[pts.length-1].p || 1;
+  // 抜けている区間
+  const gaps=[];
+  for(let i=1;i<pts.length;i++){
+    const d=pts[i].p-pts[i-1].p;
+    if(d>1) gaps.push({from:pts[i-1].p, to:pts[i].p, minutes:d-1});
+  }
+  return {pts, gaps, total};
+}
+
 /* ---------- グラフ ---------- */
 function niceStep(range,target){
   const raw=range/target, mag=Math.pow(10,Math.floor(Math.log10(raw))), n=raw/mag;
@@ -305,7 +338,8 @@ function drawChart(){
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,W,H);
   const all=(data&&data.minutes)?data.minutes:[];
-  const pts=all.slice(0,spanMin).reverse();
+  const ser=buildSeries(all, spanMin);
+  const pts=ser.pts;
   if(pts.length<2){ cmap=null; return; }
 
   let mn=Math.min(...pts.map(p=>p.min)), mx=Math.max(...pts.map(p=>p.max));
@@ -317,9 +351,9 @@ function drawChart(){
   const hi=Math.ceil((mx+span*0.08)/step)*step;
   const dec=Math.max(0,-Math.floor(Math.log10(step)));
   const padL=48,padR=14,padT=14,padB=26;
-  const X=i=>padL+(W-padL-padR)*(i/(pts.length-1));
+  const X=p=>padL+(W-padL-padR)*(p/ser.total);          // 実時刻にもとづく位置
   const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
-  cmap={X,Y,pts,padL,padR,W,H,padT,padB};
+  cmap={X,Y,pts,padL,padR,W,H,padT,padB,total:ser.total};
 
   ctx.font='400 11px "BIZ UDGothic", sans-serif';
   ctx.textBaseline='middle';
@@ -331,60 +365,84 @@ function drawChart(){
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
-  // 縦の目盛り（10分ごと）
-  pts.forEach((p,i)=>{
+  // 欠測の区間を先に塗る
+  ser.gaps.forEach(g=>{
+    const x0=X(g.from), x1=X(g.to);
+    ctx.fillStyle='rgba(232,80,58,.13)';
+    ctx.fillRect(x0,padT,x1-x0,H-padB-padT);
+    ctx.strokeStyle='rgba(232,80,58,.5)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+    ctx.beginPath(); ctx.moveTo(x0,padT); ctx.lineTo(x0,H-padB);
+    ctx.moveTo(x1,padT); ctx.lineTo(x1,H-padB); ctx.stroke(); ctx.setLineDash([]);
+    if(x1-x0>34){
+      ctx.fillStyle='#e8503a'; ctx.font='700 10px "BIZ UDGothic", sans-serif';
+      const t='欠測'+g.minutes+'分';
+      ctx.fillText(t,(x0+x1)/2-ctx.measureText(t).width/2, padT+12);
+    }
+  });
+
+  // 10分ごとの縦目盛り
+  pts.forEach(p=>{
     if(!(p.tenMin || Number((p.label||'').split(':')[1])%10===0)) return;
-    const x=X(i);
+    const x=X(p.p);
     ctx.strokeStyle='rgba(255,180,0,.22)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
     ctx.fillStyle='#6b86ad'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
     ctx.fillText(p.label, x-16, H-8);
   });
 
-  // しきい値
-  [[cfg.hi,'#e8b230'],[cfg.lo,'#6fb3d9']].forEach(function(z){
+  [[cfg.hi,'#ffb400'],[cfg.lo,'#4fa8e8']].forEach(function(z){
     if(z[0]===null||z[0]<lo||z[0]>hi) return;
     const y=Y(z[0]);
     ctx.strokeStyle=z[1]; ctx.lineWidth=1; ctx.setLineDash([5,4]);
     ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke(); ctx.setLineDash([]);
   });
 
-  // 最高〜最低の帯
-  ctx.fillStyle='rgba(79,168,232,.22)';
-  ctx.beginPath();
-  pts.forEach((p,i)=>{const x=X(i),y=Y(p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-  for(let i=pts.length-1;i>=0;i--) ctx.lineTo(X(i),Y(pts[i].min));
-  ctx.closePath(); ctx.fill();
+  // 連続している区間ごとに、帯と線を描く
+  const runs=[]; let cur=[pts[0]];
+  for(let i=1;i<pts.length;i++){
+    if(pts[i].p-pts[i-1].p>1){ runs.push(cur); cur=[]; }
+    cur.push(pts[i]);
+  }
+  runs.push(cur);
 
-  // 平均線
+  runs.forEach(run=>{
+    if(run.length<2) return;
+    ctx.fillStyle='rgba(79,168,232,.22)';
+    ctx.beginPath();
+    run.forEach((p,i)=>{const x=X(p.p),y=Y(p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    for(let i=run.length-1;i>=0;i--) ctx.lineTo(X(run[i].p),Y(run[i].min));
+    ctx.closePath(); ctx.fill();
+  });
   ctx.strokeStyle='#ffb400'; ctx.lineWidth=2.5; ctx.lineJoin='round';
-  ctx.beginPath();
-  pts.forEach((p,i)=>{const x=X(i),y=Y(p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
-  ctx.stroke();
+  runs.forEach(run=>{
+    ctx.beginPath();
+    run.forEach((p,i)=>{const x=X(p.p),y=Y(p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+    if(run.length===1){ ctx.arc(X(run[0].p),Y(run[0].avg),2,0,Math.PI*2); ctx.fillStyle='#ffb400'; ctx.fill(); }
+    else ctx.stroke();
+  });
 
-  // 欠測のある分に印
-  pts.forEach((p,i)=>{
+  // 一部欠測（10秒値が6個未満）の分に印
+  pts.forEach(p=>{
     if((p.cnt||0)>=6) return;
-    ctx.fillStyle='#d9634a';
-    ctx.beginPath(); ctx.arc(X(i),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#e8503a';
+    ctx.beginPath(); ctx.arc(X(p.p),Y(p.avg),2.5,0,Math.PI*2); ctx.fill();
   });
 
   const last=pts[pts.length-1];
   ctx.fillStyle='#ffb400';
-  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),5,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),5,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#07142b';
-  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),2,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(X(last.p),Y(last.avg),2,0,Math.PI*2); ctx.fill();
 
-  // 触っている位置
   if(hover!==null && hover>=0 && hover<pts.length){
-    const p=pts[hover], hx=X(hover), hy=Y(p.avg);
+    const p=pts[hover], hx=X(p.p), hy=Y(p.avg);
     ctx.strokeStyle='rgba(242,246,251,.8)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,H-padB); ctx.stroke();
     ctx.fillStyle='#f2f6fb';
     ctx.beginPath(); ctx.arc(hx,hy,5,0,Math.PI*2); ctx.fill();
     const lines=[p.label+'　'+f1(p.avg)+'°C',
                  '最高 '+f1(p.max)+'　最低 '+f1(p.min),
-                 '10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（欠測）':'')];
+                 '10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（一部欠測）':'')];
     ctx.font='700 13px "BIZ UDGothic", sans-serif';
     const bw=Math.max(...lines.map(l=>ctx.measureText(l).width))+16;
     const bh=lines.length*17+10;
@@ -404,7 +462,15 @@ function drawChart(){
 /* ---------- 表 ---------- */
 function drawTable(){
   const m=(data&&data.minutes)?data.minutes:[];
+  const md=l=>{const a=(l||'0:0').split(':'); return Number(a[0])*60+Number(a[1]);};
   const rows=m.map((x,i)=>{
+    const nxt=m[i+1];
+    let gapRow='';
+    if(nxt){
+      const d=(md(x.label)-md(nxt.label)+1440)%1440;
+      if(d>1) gapRow='<tr class="gap"><td colspan="6">欠測 '+(d-1)+'分（'
+        +nxt.label+' 〜 '+x.label+' の間）</td></tr>';
+    }
     const prev=m[i+1];
     let delta='—', dcls='flat';
     if(prev){
@@ -421,7 +487,7 @@ function drawTable(){
       + '<td class="lo">'+f1(x.min)+'</td>'
       + '<td>'+f1(x.avg)+'</td>'
       + '<td class="'+dcls+'">'+delta+'</td>'
-      + '<td class="'+(q<6?'bad':'')+'">'+q+'</td></tr>';
+      + '<td class="'+(q<6?'bad':'')+'">'+q+'</td></tr>' + gapRow;
   }).join('');
   $('tbody').innerHTML=rows;
 }
@@ -433,7 +499,10 @@ $('chart').addEventListener('mousemove', e=>{
   const x=e.clientX-r.left;
   const {padL,padR,W,pts}=cmap;
   const frac=(x-padL)/Math.max(1,(W-padL-padR));
-  hover=Math.round(Math.min(1,Math.max(0,frac))*(pts.length-1));
+  const target=Math.min(1,Math.max(0,frac))*cmap.total;
+  let best=0, bd=Infinity;
+  pts.forEach((p,i)=>{ const d=Math.abs(p.p-target); if(d<bd){bd=d;best=i;} });
+  hover=best;
   drawChart();
 });
 $('chart').addEventListener('mouseleave', ()=>{ hover=null; drawChart(); });
