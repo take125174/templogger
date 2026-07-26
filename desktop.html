@@ -531,7 +531,6 @@ function drawChart(){
     pts=ser.pts; gaps=ser.gaps; total=ser.total;
   }
   if(!pts || pts.length<2){ cmap=null; return; }
-  $('unitTag') && ($('unitTag').textContent='');
 
   const useMA=$('maOn').checked, maN=Number($('maN').value);
   const useRate=$('rateOn').checked;
