@@ -44,12 +44,14 @@
 
 
   /* オードメーター表示 */
-  .odo{display:inline-flex;align-items:baseline;line-height:1}
-  .odo .slot{display:inline-block;overflow:hidden;position:relative;
-    vertical-align:baseline;min-width:.62em}
-  .odo .strip{display:flex;flex-direction:column;will-change:transform}
-  .odo .strip>span{display:block;text-align:center}
-  .odo .fixed{display:inline-block;text-align:center}
+  /* .strip を flex にしない。桁も記号も flex item として絶対に縮ませない */
+  .odo{display:inline-flex !important;align-items:flex-start !important;
+    line-height:1;white-space:nowrap}
+  .odo .slot,.odo .fixed{flex:0 0 auto;display:block;text-align:center}
+  .odo .slot{position:relative;overflow:hidden;min-width:.62em}
+  .odo .fixed{white-space:pre}
+  .odo .strip{display:block;will-change:transform}
+  .odo .strip>span{display:block;flex:0 0 auto;text-align:center}
   input,select,button,option{text-shadow:none}
   main{flex:1;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;overflow:hidden}
   @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
@@ -761,50 +763,75 @@ function drawTable(){
 
 
 /* ---------- オードメーター（数字が回って切り替わる） ----------
-   桁の高さは実測ピクセルで決める。書体による em のずれで
-   桁の途中に止まるのを防ぐ。 */
+   ・.strip は flex にせず、数字行は高さ固定の block。縮まない
+   ・桁の高さは実測ピクセルで決め、書体差による半端な停止を防ぐ */
 const REPEAT=3, MID=10;
+
+// 1行ぶんの高さ（行の高さをそのまま使う）
 function odoUnit(el){
   const cs=getComputedStyle(el);
   const fs=parseFloat(cs.fontSize)||16;
   let lh=parseFloat(cs.lineHeight);
-  if(!isFinite(lh)) lh=fs;
-  return Math.max(8, Math.round(Math.min(lh, fs*1.2)));
+  if(!isFinite(lh)) lh=fs*1.2;               // line-height:normal のとき
+  return Math.max(8, Math.round(lh));
+}
+// すべての桁を今の数字の位置へ吸着させる
+function odoSnap(el){
+  el._slots.forEach(s=>{
+    if(s.kind!=='d') return;
+    clearTimeout(s.tid);
+    s.strip.style.transition='none';
+    s.strip.style.transform='translateY('+(-(MID+s.d)*el._h)+'px)';
+  });
 }
 function odoBuild(el, text){
   el.classList.add('odo');
   el.innerHTML=''; el._slots=[];
   const H=odoUnit(el);
-  el._h=H;
+  el._u=H;                                   // 作り直しの判定用
+  el._h=H;                                   // ずらす量（後で実測に置き換え）
+  el.style.height=H+'px';
+  const box=n=>{ n.style.height=H+'px'; n.style.lineHeight=H+'px'; };
   for(const ch of text){
     if(ch>='0' && ch<='9'){
       const slot=document.createElement('span');
-      slot.className='slot'; slot.style.height=H+'px';
+      slot.className='slot'; box(slot);
       const strip=document.createElement('span'); strip.className='strip';
       for(let r=0;r<REPEAT;r++) for(let d=0;d<10;d++){
         const x=document.createElement('span');
-        x.textContent=d; x.style.height=H+'px'; x.style.lineHeight=H+'px';
+        x.textContent=d; box(x);               // 各行の高さを固定＝縮まない
         strip.appendChild(x);
       }
       slot.appendChild(strip); el.appendChild(slot);
-      const d=Number(ch);
-      strip.style.transition='none';
-      strip.style.transform='translateY('+(-(MID+d)*H)+'px)';
-      el._slots.push({strip, d, kind:'d', tid:0});
+      el._slots.push({strip, d:Number(ch), kind:'d', tid:0});
     } else {
-      const f=document.createElement('span'); f.className='fixed'; f.textContent=ch;
+      const f=document.createElement('span');
+      f.className='fixed'; f.textContent=ch; box(f);
       el.appendChild(f); el._slots.push({el:f, kind:'f', ch});
     }
   }
+  // 実際に描画された1行の高さを測る。指定値とずれていれば実測を使う
+  const row=el.querySelector('.strip>span');
+  if(row){
+    const real=row.getBoundingClientRect().height;
+    if(real>0.5 && Math.abs(real-H)>=0.5) el._h=real;
+  }
+  odoSnap(el);
   el._text=text;
 }
 function odoSet(el, text, dir, ms){
   if(!el) return;
-  if(!el._slots || el._text===undefined || el._text.length!==text.length
-     || !el.classList.contains('odo') || el._h!==odoUnit(el)
-     || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
-    odoBuild(el, text); return;
-  }
+  // 桁数・記号の位置・数字⇔記号の入れ替わり・高さ変化があれば作り直す
+  const changed = !el._slots || el._text===undefined
+    || el._text.length!==text.length
+    || !el.classList.contains('odo')
+    || el._u!==odoUnit(el)
+    || el._slots.some((s,i)=>{
+         const isNum = text[i]>='0' && text[i]<='9';
+         return s.kind==='d' ? !isNum : (isNum || s.ch!==text[i]);
+       });
+  if(changed){ odoBuild(el, text); return; }
+
   const dur=(ms===undefined?600:ms), H=el._h;
   el._slots.forEach((s,i)=>{
     if(s.kind!=='d') return;
@@ -834,14 +861,16 @@ function odoSet(el, text, dir, ms){
 let lastTemp=null;
 function setNum(el, text, value){
   if(!el) return;
-  if(!cfg.odo){ el.textContent=text; el._slots=null; el._text=undefined; return; }
+  if(!cfg.odo){ el.classList.remove('odo'); el.style.height='';
+                el.textContent=text; el._slots=null; el._text=undefined; return; }
   const dir = (lastTemp===null||value===lastTemp) ? 0 : (value>lastTemp?1:-1);
   odoSet(el, text, dir, 650);
 }
 // 補助的な数値（統計など）。前回値と比べて向きを決める
 function setVal(el, text, ms){
   if(!el) return;
-  if(!cfg.odo){ el.textContent=text; el._slots=null; el._text=undefined; el._v=text; return; }
+  if(!cfg.odo){ el.classList.remove('odo'); el.style.height='';
+                el.textContent=text; el._slots=null; el._text=undefined; el._v=text; return; }
   const prev=el._v;
   let dir=0;
   if(prev!==undefined && prev!==null){
@@ -1113,7 +1142,7 @@ $('btnSave').onclick=()=>{
   cfg.bgOn=$('bgOn').checked;
   cfg.odo=$('odoOn').checked;
   ['bigNum','kBigNum','allMax','allMin','cnt','h1max','h1min','h1avg','h1range','h1gap',
-   'kTrend','kMax','kMin','kRange','kNext','kClock','ladderNextV'].forEach(id=>{
+   'kTrend','kMax','kMin','kRange','kNext','kClock','ladderNextV','trVal'].forEach(id=>{
     const e=$(id); if(e){ e._slots=null; e._text=undefined; e._v=undefined; }
   });
   localStorage.setItem(K_SET, JSON.stringify(cfg));
