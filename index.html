@@ -220,6 +220,7 @@
     <button id="gsSend">今すぐ送信</button>
     <button id="gsOpen">表示ページを開く</button>
     <button id="gsReset" class="stop">シートをリセット</button>
+    <button id="gsResend">全部送り直す</button>
   </div>
   <label class="ctl"><span>送信間隔</span>
     <select id="gsEvery">
@@ -1257,7 +1258,7 @@ function paintDebug(r){
 /* ---------- スプレッドシートへの送信 ----------
    Apps Script は事前確認(preflight)に対応しないので、
    Content-Type を text/plain にして「単純なリクエスト」にする */
-let gsQueue=[], gsSending=false, gsLastOk=null, gsFails=0, gsSendStart=0;
+let gsQueue=[], gsSending=false, gsLastOk=null, gsFails=0, gsSendStart=0, gsSentTs=0;
 
 // 応答が返らないまま固まるのを防ぐ。時間切れで必ず抜ける
 function fetchTimeout(url, opts, ms){
@@ -1294,8 +1295,10 @@ async function gsFlush(force){
       setTimeout(()=>runCommand(payload.cmd, url), 0);
     }
     if(ok){
+      for(const b of batch) if(b[0]>gsSentTs) gsSentTs=b[0];   // 送信済みの最終時刻
       gsQueue=gsQueue.slice(batch.length);
       gsLastOk=Date.now(); gsFails=0;
+      saveMeta();
       gsShow('送信済み '+new Date().toLocaleTimeString('ja-JP')+'　待ち '+gsQueue.length+'件');
       return true;
     } else {
@@ -1359,12 +1362,17 @@ $('gsTest').onclick = async ()=>{
 };
 $('gsSend').onclick = ()=>{
   if(!gsUrl()){ gsShow('URLを入れてください'); return; }
-  // 未送信ぶんが無ければ、記録済みの全データを送る
-  if(!gsQueue.length) gsQueue=S.points.slice();
-  if(!gsQueue.length){ gsShow('送るデータがありません'); return; }
+  // 未送信ぶんが無ければ、まだ送っていない記録だけを送る（重複を作らない）
+  if(!gsQueue.length) gsQueue=S.points.filter(p=>p[0]>gsSentTs);
+  if(!gsQueue.length){ gsShow('未送信のデータはありません'); return; }
   gsFlushAll();
 };
 $('gsOpen').onclick = ()=>{ const u=gsUrl(); if(u) window.open(u,'_blank'); };
+$('gsResend').onclick = ()=>{
+  if(!confirm('記録済みの全データを送り直します。\nシート側に重複が入るので、先にシートをリセットしておいてください。')) return;
+  gsQueue=S.points.slice();
+  gsFlushAll();
+};
 $('gsReset').onclick = async ()=>{
   const url=gsUrl();
   if(!url){ gsShow('URLを入れてください'); return; }
@@ -1616,7 +1624,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value, vMin:$('vMin').value, vMax:$('vMax').value, vJump:$('vJump').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsSentTs:gsSentTs, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value, vMin:$('vMin').value, vMax:$('vMax').value, vJump:$('vJump').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1634,6 +1642,7 @@ async function load(){
     if(m){ const o=JSON.parse(m.value);
       if(o.cal) S.cal=o.cal;
       if(o.gsUrl) $('gsUrl').value=o.gsUrl;
+      if(o.gsSentTs) gsSentTs=o.gsSentTs;
       if(o.gsEvery) $('gsEvery').value=o.gsEvery;
       if(o.gsRemote) $('gsRemote').value=o.gsRemote;
       if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; if(o.grid.i!==undefined) $('gI').value=o.grid.i; }
