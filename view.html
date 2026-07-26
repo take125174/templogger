@@ -29,6 +29,14 @@
     -webkit-text-size-adjust:100%}
   body{padding:calc(14px + env(safe-area-inset-top)) 12px 48px;max-width:540px;margin:0 auto}
 
+
+  /* オードメーター */
+  .odo{display:inline-flex;align-items:baseline;line-height:1}
+  .odo .slot{display:inline-block;overflow:hidden;height:1em;position:relative;
+    vertical-align:baseline;min-width:.62em}
+  .odo .strip{display:flex;flex-direction:column;will-change:transform}
+  .odo .strip>span{height:1em;line-height:1;display:block;text-align:center}
+  .odo .fixed{display:inline-block;text-align:center}
   .banner{border-radius:9px;padding:12px;margin-bottom:14px;font-size:14px;line-height:1.6;display:none}
   .banner b{display:block;font-size:15px;margin-bottom:3px}
   .banner.hot{background:#3a2a12;border:1px solid #7a5a20;color:#f5d489}
@@ -36,7 +44,8 @@
   .banner.dead{background:#3a1f1a;border:1px solid #7a3a32;color:#f3c4bb}
 
   .now{text-align:center;margin-bottom:12px}
-  .big{font-size:72px;font-weight:700;font-family:var(--num);line-height:1;color:var(--green)}
+  .big{font-size:72px;font-weight:700;font-family:var(--num);line-height:1;color:var(--green);
+    display:inline-flex;align-items:baseline;justify-content:center}
   .big.stale{color:var(--muted)}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)}
   .unit{font-size:26px;margin-left:6px;color:var(--muted)}
@@ -46,7 +55,8 @@
   .cards{display:flex;gap:8px;justify-content:center;margin-top:14px;flex-wrap:wrap}
   .c{background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:9px 14px;min-width:100px}
   .c .k{display:block;font-size:10px;color:var(--muted);letter-spacing:.1em;margin-bottom:4px}
-  .c b{font-family:var(--num);font-size:20px;font-weight:700}
+  .c b{font-family:var(--num);font-size:20px;font-weight:700;
+    display:inline-flex;align-items:baseline;justify-content:center}
 
   #chart{width:100%;height:150px;display:block;margin:10px 0 18px}
 
@@ -99,6 +109,11 @@
   <input id="deadMin" inputmode="numeric" placeholder="5">
   <div class="lbl" style="margin-top:12px">画面の更新間隔（秒）</div>
   <input id="pollSec" inputmode="numeric" placeholder="5">
+  <div class="lbl" style="margin-top:12px">
+    <label style="display:flex;align-items:center;gap:8px;color:var(--text);font-size:13px">
+      <input type="checkbox" id="odoOn" style="width:auto"> 数字を回して表示する
+    </label>
+  </div>
   <button id="notify">通知を許可する</button>
   <button class="go" id="saveSet">保存</button>
 </div>
@@ -130,9 +145,17 @@
 
 <script>
 const $ = id => document.getElementById(id);
+// 応答が返らないまま固まるのを防ぐ
+function fetchTimeout(url, opts, ms){
+  const ac=(typeof AbortController!=='undefined')?new AbortController():null;
+  const o=Object.assign({}, opts||{});
+  if(ac) o.signal=ac.signal;
+  const t=setTimeout(()=>{ if(ac) ac.abort(); }, ms||15000);
+  return fetch(url,o).finally(()=>clearTimeout(t));
+}
 const K_URL='templogger:viewUrl', K_SET='templogger:alerts';
 
-let cfg = { hi:null, lo:null, deadMin:5, pollSec:5 };
+let cfg = { hi:null, lo:null, deadMin:5, pollSec:5, odo:true };
 try{ Object.assign(cfg, JSON.parse(localStorage.getItem(K_SET)||'{}')); }catch(e){}
 
 function endpoint(){
@@ -140,6 +163,82 @@ function endpoint(){
   return u.searchParams.get('url') || localStorage.getItem(K_URL) || '';
 }
 function fmt(v){ return (Math.round(v*10)/10).toFixed(1); }
+
+
+/* ---------- オードメーター（数字が回って切り替わる） ---------- */
+const REPEAT=3, MID=1;
+function odoBuild(el, text){
+  el.classList.add('odo');
+  el.innerHTML=''; el._slots=[];
+  for(const ch of text){
+    if(ch>='0' && ch<='9'){
+      const slot=document.createElement('span'); slot.className='slot';
+      const strip=document.createElement('span'); strip.className='strip';
+      for(let r=0;r<REPEAT;r++) for(let d=0;d<10;d++){
+        const s2=document.createElement('span'); s2.textContent=d; strip.appendChild(s2);
+      }
+      slot.appendChild(strip); el.appendChild(slot);
+      const idx=MID*10+Number(ch);
+      strip.style.transform='translateY(-'+idx+'em)';
+      el._slots.push({slot,strip,idx,kind:'d'});
+    } else {
+      const f=document.createElement('span'); f.className='fixed'; f.textContent=ch;
+      el.appendChild(f); el._slots.push({el:f,kind:'f',ch});
+    }
+  }
+  el._text=text;
+}
+function odoSet(el, text, dir, ms){
+  if(!el) return;
+  if(!el._slots || el._text===undefined || el._text.length!==text.length
+     || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
+    odoBuild(el, text); return;
+  }
+  const dur=(ms===undefined?600:ms);
+  el._slots.forEach((s,i)=>{
+    const ch=text[i];
+    if(s.kind!=='d') return;
+    const cur=s.idx, curD=cur%10, want=Number(ch);
+    if(curD===want) return;
+    let next;
+    if(dir>0)      next=cur + ((want-curD+10)%10);
+    else if(dir<0) next=cur - ((curD-want+10)%10);
+    else { const up=(want-curD+10)%10, dn=(curD-want+10)%10;
+           next = up<=dn ? cur+up : cur-dn; }
+    s.strip.style.transition='transform '+dur+'ms cubic-bezier(.22,.9,.24,1)';
+    s.strip.style.transform='translateY(-'+next+'em)';
+    s.idx=next;
+    if(next<5 || next>=REPEAT*10-5){
+      setTimeout(()=>{
+        const back=MID*10+(s.idx%10);
+        s.strip.style.transition='none';
+        s.strip.style.transform='translateY(-'+back+'em)';
+        s.idx=back; void s.strip.offsetHeight;
+      }, dur+40);
+    }
+  });
+  el._text=text;
+}
+let lastTemp=null;
+function setNum(el, text, value){
+  if(!el) return;
+  if(!cfg.odo){ el.textContent=text; el._slots=null; el._text=undefined; return; }
+  const dir=(lastTemp===null||value===lastTemp)?0:(value>lastTemp?1:-1);
+  odoSet(el, text, dir, 650);
+}
+function setVal(el, text, ms){
+  if(!el) return;
+  if(!cfg.odo){ el.textContent=text; el._slots=null; el._text=undefined; el._v=text; return; }
+  const prev=el._v;
+  let dir=0;
+  if(prev!==undefined && prev!==null){
+    const a=parseFloat(String(prev).replace(/[^0-9.\-]/g,''));
+    const b=parseFloat(String(text).replace(/[^0-9.\-]/g,''));
+    if(isFinite(a)&&isFinite(b)&&a!==b) dir = b>a ? 1 : -1;
+  }
+  el._v=text;
+  odoSet(el, text, dir, ms===undefined?450:ms);
+}
 
 /* ---------- アラート ---------- */
 let lastState='', lastNotify=0;
@@ -185,22 +284,35 @@ function renderHead(d, state){
   if(state==='hot') cls+=' hot'; else if(state==='cold') cls+=' cold';
   else if(stale) cls+=' stale';
 
-  let trend='';
+  const now=$('now');
+  // 骨組みは一度だけ作り、以降は数値だけ差し替える
+  if(!now._built){
+    now.innerHTML =
+      '<div class="'+cls+'" id="bigWrap"><span id="bigNum">--.-</span><span class="unit">°C</span></div>'
+      + '<div class="trend" id="trendBox"></div>'
+      + '<div class="sub" id="subBox"></div>'
+      + '<div class="cards">'
+      + '<div class="c"><span class="k">全期間 最高</span><b class="hi" id="cMax">-</b></div>'
+      + '<div class="c"><span class="k">全期間 最低</span><b class="lo" id="cMin">-</b></div>'
+      + '<div class="c"><span class="k">10秒値</span><b id="cCnt">-</b></div>'
+      + '</div>';
+    now._built=true;
+  }
+  $('bigWrap').className=cls;
+  setNum($('bigNum'), fmt(d.temp), d.temp);
+
   const m=d.minutes||[];
   if(m.length>=11){
     const diff=m[0].avg-m[10].avg;
     const arrow = diff>0.05?'▲' : diff<-0.05?'▼' : '→';
-    trend='<div class="trend">'+arrow+' 10分で '+(diff>=0?'+':'')+diff.toFixed(1)+'°C</div>';
-  }
-  $('now').innerHTML =
-    '<div class="'+cls+'">'+fmt(d.temp)+'<span class="unit">°C</span></div>'
-    + trend
-    + '<div class="sub">'+d.at+'（'+d.ageSec+'秒前）</div>'
-    + '<div class="cards">'
-    + '<div class="c"><span class="k">全期間 最高</span><b class="hi">'+fmt(d.allMax)+'</b></div>'
-    + '<div class="c"><span class="k">全期間 最低</span><b class="lo">'+fmt(d.allMin)+'</b></div>'
-    + '<div class="c"><span class="k">記録数</span><b>'+d.count.toLocaleString()+'</b></div>'
-    + '</div>';
+    $('trendBox').textContent = arrow+' 10分で '+(diff>=0?'+':'')+diff.toFixed(1)+'°C';
+  } else $('trendBox').textContent='';
+  $('subBox').textContent = d.at+'（'+d.ageSec+'秒前）';
+
+  setVal($('cMax'), fmt(d.allMax));
+  setVal($('cMin'), fmt(d.allMin));
+  setVal($('cCnt'), (d.count||0).toLocaleString());
+  lastTemp=d.temp;
 }
 
 /* ---------- グラフ ---------- */
@@ -428,12 +540,13 @@ async function load(){
   $('setup').style.display='none';
   try{
     const sep=url.includes('?')?'&':'?';
-    const res=await fetch(url+sep+'format=json&_='+Date.now());
+    const res=await fetchTimeout(url+sep+'format=json&_='+Date.now(), {}, 15000);
     const d=await res.json();
     if(!d.ok) throw new Error(d.error||'応答が不正です');
     if(d.empty){
       $('app').innerHTML='<div class="msg">まだ記録がありません</div>';
-      $('now').innerHTML=''; $('table').innerHTML=''; tableKey='';
+      $('now').innerHTML=''; $('now')._built=false;
+      $('table').innerHTML=''; tableKey='';
       return;
     }
     $('app').innerHTML='';
@@ -452,6 +565,7 @@ async function load(){
   }catch(e){
     $('app').innerHTML='<div class="msg">読み込めませんでした<div class="err">'+String(e)
       +'</div>URLと、デプロイのアクセス権が「全員」かを確認してください。</div>';
+    $('now')._built=false; $('now').innerHTML=''; $('table').innerHTML=''; tableKey='';
   }
 }
 
@@ -468,6 +582,7 @@ $('openSet').onclick=e=>{
   $('lo').value = cfg.lo===null?'':cfg.lo;
   $('deadMin').value = cfg.deadMin;
   $('pollSec').value = cfg.pollSec;
+  $('odoOn').checked = !!cfg.odo;
   $('settings').style.display = $('settings').style.display==='block' ? 'none' : 'block';
 };
 $('saveSet').onclick=()=>{
@@ -475,6 +590,10 @@ $('saveSet').onclick=()=>{
   cfg.hi=num($('hi').value); cfg.lo=num($('lo').value);
   const dm=parseFloat($('deadMin').value); cfg.deadMin=isFinite(dm)?dm:0;
   const ps=parseFloat($('pollSec').value); cfg.pollSec=isFinite(ps)&&ps>=2?ps:5;
+  cfg.odo=$('odoOn').checked;
+  ['bigNum','cMax','cMin','cCnt'].forEach(id=>{
+    const e=$(id); if(e){ e._slots=null; e._text=undefined; e._v=undefined; }
+  });
   restartPoll();
   localStorage.setItem(K_SET, JSON.stringify(cfg));
   $('settings').style.display='none';
@@ -485,7 +604,7 @@ $('notify').onclick=async ()=>{
   try{
     const p=await Notification.requestPermission();
     $('notify').textContent = p==='granted' ? '通知は許可されています' : '通知は許可されませんでした';
-  }catch(e){ $('notify').textContent='通知を有効にできませんでした'; }
+  }catch(e){ $('notify').textContent='通知を有効にできませんでした（ホーム画面に追加してからお試しください）'; }
 };
 
 
@@ -495,7 +614,7 @@ let snapAtSeen='', snapTakenAt=0;
 
 async function fetchSnap(){
   const url=endpoint();
-  const r=await fetch(url+(url.includes('?')?'&':'?')+'what=snapshot&_='+Date.now());
+  const r=await fetchTimeout(url+(url.includes('?')?'&':'?')+'what=snapshot&_='+Date.now(), {}, 20000);
   return await r.json();
 }
 
@@ -595,7 +714,11 @@ function restartPoll(){
 load();
 restartPoll();
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
-window.addEventListener('resize',()=>{ tableKey=''; load(); });
+let rzTimer=null;
+window.addEventListener('resize',()=>{
+  clearTimeout(rzTimer);
+  rzTimer=setTimeout(()=>{ tableKey=''; if(lastData){ drawChart(lastData); renderTable(lastData); } }, 200);
+});
 </script>
 </body>
 </html>
