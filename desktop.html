@@ -62,7 +62,7 @@
     width:.62em;height:1em;line-height:1em;text-align:center}
   .odo.odo .slot::after{content:"0";visibility:hidden} /* 透明な数字で基準線を作る */
   .odo.odo .strip{display:block;position:absolute;left:0;top:0;width:100%;
-    margin:0;padding:0;font-size:inherit;will-change:transform}
+    margin:0;padding:0;font-size:inherit;color:inherit;opacity:1;will-change:transform}
   .odo.odo .strip>span{display:block;height:1em;line-height:1em;text-align:center;
     margin:0;padding:0;font-size:inherit;color:inherit;opacity:1}
   .odo.odo .fixed{display:inline-block;line-height:1em;white-space:pre;text-align:center}
@@ -201,7 +201,9 @@
   #kSpark{width:min(78vw,900px);height:110px;margin-top:14px;opacity:.95}
   .kCards{display:flex;gap:clamp(18px,3.4vw,54px);margin-top:18px;flex-wrap:wrap;justify-content:center}
   .kCards div{text-align:center}
-  .kCards span{display:block;font-size:clamp(11px,1.05vw,14px);color:var(--kSoft);margin-bottom:5px}
+  /* 直下の子だけに当てる。子孫セレクタだとオードメーター内部の
+     span まで巻き込んで、数字と小数点で色が割れる */
+  .kCards div > span{display:block;font-size:clamp(11px,1.05vw,14px);color:var(--kSoft);margin-bottom:5px}
   .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:var(--kfg);
     text-shadow:0 2px 8px var(--kshadow);display:inline-flex;align-items:baseline;justify-content:center}
   .kHint{position:absolute;bottom:20px;font-size:12px;color:var(--kFaint)}
