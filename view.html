@@ -166,7 +166,9 @@ function fmt(v){ return (Math.round(v*10)/10).toFixed(1); }
 
 
 /* ---------- オードメーター（数字が回って切り替わる） ---------- */
-const REPEAT=3, MID=1;
+// 0-9 を3組並べ、常に中央（10〜19）の位置に収まるようにする。
+// 動かす前に必ず正しい位置へ吸着させるので、途中で更新が入ってもずれない。
+const REPEAT=3, MID=10;
 function odoBuild(el, text){
   el.classList.add('odo');
   el.innerHTML=''; el._slots=[];
@@ -175,15 +177,16 @@ function odoBuild(el, text){
       const slot=document.createElement('span'); slot.className='slot';
       const strip=document.createElement('span'); strip.className='strip';
       for(let r=0;r<REPEAT;r++) for(let d=0;d<10;d++){
-        const s2=document.createElement('span'); s2.textContent=d; strip.appendChild(s2);
+        const x=document.createElement('span'); x.textContent=d; strip.appendChild(x);
       }
       slot.appendChild(strip); el.appendChild(slot);
-      const idx=MID*10+Number(ch);
-      strip.style.transform='translateY(-'+idx+'em)';
-      el._slots.push({slot,strip,idx,kind:'d'});
+      const d=Number(ch);
+      strip.style.transition='none';
+      strip.style.transform='translateY(-'+(MID+d)+'em)';
+      el._slots.push({strip, d, kind:'d', tid:0});
     } else {
       const f=document.createElement('span'); f.className='fixed'; f.textContent=ch;
-      el.appendChild(f); el._slots.push({el:f,kind:'f',ch});
+      el.appendChild(f); el._slots.push({el:f, kind:'f', ch});
     }
   }
   el._text=text;
@@ -191,32 +194,33 @@ function odoBuild(el, text){
 function odoSet(el, text, dir, ms){
   if(!el) return;
   if(!el._slots || el._text===undefined || el._text.length!==text.length
-     || !el.classList.contains('odo')          // クラスが外されていたら作り直す
+     || !el.classList.contains('odo')
      || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
     odoBuild(el, text); return;
   }
   const dur=(ms===undefined?600:ms);
   el._slots.forEach((s,i)=>{
-    const ch=text[i];
     if(s.kind!=='d') return;
-    const cur=s.idx, curD=cur%10, want=Number(ch);
-    if(curD===want) return;
-    let next;
-    if(dir>0)      next=cur + ((want-curD+10)%10);
-    else if(dir<0) next=cur - ((curD-want+10)%10);
-    else { const up=(want-curD+10)%10, dn=(curD-want+10)%10;
-           next = up<=dn ? cur+up : cur-dn; }
+    const want=Number(text[i]), cur=s.d;
+    if(cur===want) return;
+    let delta;
+    if(dir>0)      delta =  (want-cur+10)%10;
+    else if(dir<0) delta = -((cur-want+10)%10);
+    else { const up=(want-cur+10)%10, dn=(cur-want+10)%10; delta = up<=dn ? up : -dn; }
+
+    clearTimeout(s.tid);
+    // いまの数字の位置へ確実に吸着させてから動かす
+    s.strip.style.transition='none';
+    s.strip.style.transform='translateY(-'+(MID+cur)+'em)';
+    void s.strip.offsetHeight;
     s.strip.style.transition='transform '+dur+'ms cubic-bezier(.22,.9,.24,1)';
-    s.strip.style.transform='translateY(-'+next+'em)';
-    s.idx=next;
-    if(next<5 || next>=REPEAT*10-5){
-      setTimeout(()=>{
-        const back=MID*10+(s.idx%10);
-        s.strip.style.transition='none';
-        s.strip.style.transform='translateY(-'+back+'em)';
-        s.idx=back; void s.strip.offsetHeight;
-      }, dur+40);
-    }
+    s.strip.style.transform='translateY(-'+(MID+cur+delta)+'em)';
+    s.d=want;
+    // 動き終わったら中央の正しい位置に置き直す
+    s.tid=setTimeout(()=>{
+      s.strip.style.transition='none';
+      s.strip.style.transform='translateY(-'+(MID+s.d)+'em)';
+    }, dur+60);
   });
   el._text=text;
 }
