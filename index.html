@@ -2,6 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>7セグ温度ロガー</title>
 <style>
@@ -169,6 +170,22 @@
       <option value="1" selected>末尾1桁を小数（30.1）</option>
       <option value="0">小数なし（301）</option>
       <option value="auto">画像の点を使う</option>
+    </select>
+  </label>
+  <label class="ctl"><span>妥当な範囲</span>
+    <span style="font-size:12px;color:var(--muted)">下限</span>
+    <input type="number" id="vMin" value="-10" step="1"
+      style="width:64px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font-family:var(--mono);font-size:13px;text-align:center">
+    <span style="font-size:12px;color:var(--muted)">上限</span>
+    <input type="number" id="vMax" value="50" step="1"
+      style="width:64px;background:#0b0f0d;color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px;font-family:var(--mono);font-size:13px;text-align:center">
+  </label>
+  <label class="ctl"><span>急変を拒否</span>
+    <select id="vJump">
+      <option value="0">しない</option>
+      <option value="2">2°C/分 を超えたら</option>
+      <option value="5" selected>5°C/分 を超えたら</option>
+      <option value="15">15°C/分 を超えたら</option>
     </select>
   </label>
   <label class="ctl"><span>連写枚数</span>
@@ -1091,6 +1108,26 @@ function readCalibrated(){
   else if(mode==='1' && text.length>1) str=text.slice(0,-1)+'.'+text.slice(-1);
   const v=parseFloat(str);
   if(!isFinite(v)) return {ok:false, why:'数値化できない '+str, src, boxes};
+
+  // 全桁が同じ状態＝影や照明の急変。数字として信用しない
+  const allOn = per.every(({g})=>g.every(x=>dark ? x<th : x>th));
+  const allOff= per.every(({g})=>g.every(x=>dark ? x>=th : x<=th));
+  if(allOn || allOff) return {ok:false, why:'全セグメントが同じ状態（影や照明の変化）', src, boxes};
+
+  // ありえない値を弾く
+  const lo=Number($('vMin').value), hi=Number($('vMax').value);
+  if(isFinite(lo) && isFinite(hi) && (v<lo || v>hi))
+    return {ok:false, why:'範囲外の値 '+str+'（'+lo+'〜'+hi+'）', src, boxes};
+
+  // 短時間での急変を弾く
+  const jump=Number($('vJump').value);
+  if(jump>0 && S.last!==null && S.points.length){
+    const dtMin=(Date.now()-S.points[S.points.length-1][0])/60000;
+    if(dtMin>0 && dtMin<10){
+      const rate=Math.abs(v-S.last)/Math.max(dtMin, 1/60);
+      if(rate>jump) return {ok:false, why:'急に変わりすぎ '+str+'（'+rate.toFixed(0)+'°C/分）', src, boxes};
+    }
+  }
   return {ok:true, value:v, str, src, boxes, text};
 }
 
@@ -1579,7 +1616,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value, vMin:$('vMin').value, vMax:$('vMax').value, vJump:$('vJump').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1606,6 +1643,9 @@ async function load(){
       if(o.segTh)$('segTh').value=o.segTh;
       if(o.decimals)$('decimals').value=o.decimals;
       if(o.burst)$('burst').value=o.burst;
+      if(o.vMin!==undefined)$('vMin').value=o.vMin;
+      if(o.vMax!==undefined)$('vMax').value=o.vMax;
+      if(o.vJump!==undefined)$('vJump').value=o.vJump;
       syncLabels(); roiToSliders(); showCal();
     }
   }catch(e){}
@@ -1801,7 +1841,7 @@ $('interval').addEventListener('change', ()=>{
     : (S.cal ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
              : '未校正。今の表示を入力して「この値で校正」を押すと、桁の位置と明るさを学習して読み取りが安定します。');
 });
-for(const id of ['thOff','segTh','decimals','burst','interval']) $(id).addEventListener('change', ()=>{
+for(const id of ['thOff','segTh','decimals','burst','interval','vMin','vMax','vJump']) $(id).addEventListener('change', ()=>{
   saveMeta();
   if(S.running){ clearInterval(S.timer); S.timer=setInterval(tick, Number($('interval').value)*1000); }
 });
