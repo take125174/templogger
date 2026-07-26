@@ -32,10 +32,10 @@
 
   /* オードメーター */
   .odo{display:inline-flex;align-items:baseline;line-height:1}
-  .odo .slot{display:inline-block;overflow:hidden;height:1em;position:relative;
+  .odo .slot{display:inline-block;overflow:hidden;position:relative;
     vertical-align:baseline;min-width:.62em}
   .odo .strip{display:flex;flex-direction:column;will-change:transform}
-  .odo .strip>span{height:1em;line-height:1;display:block;text-align:center}
+  .odo .strip>span{display:block;text-align:center}
   .odo .fixed{display:inline-block;text-align:center}
   .banner{border-radius:9px;padding:12px;margin-bottom:14px;font-size:14px;line-height:1.6;display:none}
   .banner b{display:block;font-size:15px;margin-bottom:3px}
@@ -165,24 +165,36 @@ function endpoint(){
 function fmt(v){ return (Math.round(v*10)/10).toFixed(1); }
 
 
-/* ---------- オードメーター（数字が回って切り替わる） ---------- */
-// 0-9 を3組並べ、常に中央（10〜19）の位置に収まるようにする。
-// 動かす前に必ず正しい位置へ吸着させるので、途中で更新が入ってもずれない。
+/* ---------- オードメーター（数字が回って切り替わる） ----------
+   桁の高さは実測ピクセルで決める。書体による em のずれで
+   桁の途中に止まるのを防ぐ。 */
 const REPEAT=3, MID=10;
+function odoUnit(el){
+  const cs=getComputedStyle(el);
+  const fs=parseFloat(cs.fontSize)||16;
+  let lh=parseFloat(cs.lineHeight);
+  if(!isFinite(lh)) lh=fs;
+  return Math.max(8, Math.round(Math.min(lh, fs*1.2)));
+}
 function odoBuild(el, text){
   el.classList.add('odo');
   el.innerHTML=''; el._slots=[];
+  const H=odoUnit(el);
+  el._h=H;
   for(const ch of text){
     if(ch>='0' && ch<='9'){
-      const slot=document.createElement('span'); slot.className='slot';
+      const slot=document.createElement('span');
+      slot.className='slot'; slot.style.height=H+'px';
       const strip=document.createElement('span'); strip.className='strip';
       for(let r=0;r<REPEAT;r++) for(let d=0;d<10;d++){
-        const x=document.createElement('span'); x.textContent=d; strip.appendChild(x);
+        const x=document.createElement('span');
+        x.textContent=d; x.style.height=H+'px'; x.style.lineHeight=H+'px';
+        strip.appendChild(x);
       }
       slot.appendChild(strip); el.appendChild(slot);
       const d=Number(ch);
       strip.style.transition='none';
-      strip.style.transform='translateY(-'+(MID+d)+'em)';
+      strip.style.transform='translateY('+(-(MID+d)*H)+'px)';
       el._slots.push({strip, d, kind:'d', tid:0});
     } else {
       const f=document.createElement('span'); f.className='fixed'; f.textContent=ch;
@@ -194,11 +206,11 @@ function odoBuild(el, text){
 function odoSet(el, text, dir, ms){
   if(!el) return;
   if(!el._slots || el._text===undefined || el._text.length!==text.length
-     || !el.classList.contains('odo')
+     || !el.classList.contains('odo') || el._h!==odoUnit(el)
      || el._slots.some((s,i)=>s.kind==='f' && s.ch!==text[i])){
     odoBuild(el, text); return;
   }
-  const dur=(ms===undefined?600:ms);
+  const dur=(ms===undefined?600:ms), H=el._h;
   el._slots.forEach((s,i)=>{
     if(s.kind!=='d') return;
     const want=Number(text[i]), cur=s.d;
@@ -211,15 +223,15 @@ function odoSet(el, text, dir, ms){
     clearTimeout(s.tid);
     // いまの数字の位置へ確実に吸着させてから動かす
     s.strip.style.transition='none';
-    s.strip.style.transform='translateY(-'+(MID+cur)+'em)';
+    s.strip.style.transform='translateY('+(-(MID+cur)*H)+'px)';
     void s.strip.offsetHeight;
     s.strip.style.transition='transform '+dur+'ms cubic-bezier(.22,.9,.24,1)';
-    s.strip.style.transform='translateY(-'+(MID+cur+delta)+'em)';
+    s.strip.style.transform='translateY('+(-(MID+cur+delta)*H)+'px)';
     s.d=want;
-    // 動き終わったら中央の正しい位置に置き直す
+    // 動き終わったら正しい位置に置き直す
     s.tid=setTimeout(()=>{
       s.strip.style.transition='none';
-      s.strip.style.transform='translateY(-'+(MID+s.d)+'em)';
+      s.strip.style.transform='translateY('+(-(MID+s.d)*el._h)+'px)';
     }, dur+60);
   });
   el._text=text;
@@ -723,13 +735,25 @@ function restartPoll(){
   if(pollTimer) clearInterval(pollTimer);
   pollTimer=setInterval(load, Math.max(2, cfg.pollSec||5)*1000);
 }
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(()=>{
+  ['bigNum','cMax','cMin','cCnt','trVal'].forEach(id=>{
+    const e=$(id); if(e){ e._slots=null; e._text=undefined; }
+  });
+  if(lastData) renderHead(lastData, checkAlert(lastData));
+});
 load();
 restartPoll();
 document.addEventListener('visibilitychange',()=>{ if(!document.hidden) load(); });
 let rzTimer=null;
 window.addEventListener('resize',()=>{
   clearTimeout(rzTimer);
-  rzTimer=setTimeout(()=>{ tableKey=''; if(lastData){ drawChart(lastData); renderTable(lastData); } }, 200);
+  rzTimer=setTimeout(()=>{
+    tableKey='';
+    ['bigNum','cMax','cMin','cCnt','trVal'].forEach(id=>{
+      const e=$(id); if(e){ e._slots=null; e._text=undefined; }
+    });
+    if(lastData){ renderHead(lastData, checkAlert(lastData)); drawChart(lastData); renderTable(lastData); }
+  }, 200);
 });
 </script>
 </body>
