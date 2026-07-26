@@ -4,26 +4,33 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
 <title>気温モニター</title>
 <style>
   :root{
-    --ink:#0d1210; --panel:#161d1a; --panel2:#1b2420; --line:#2b3733;
-    --text:#dfe6e1; --muted:#7e8d86; --dim:#55625c;
-    --green:#33c76e; --amber:#e8b230; --blue:#6fb3d9; --red:#d9634a;
-    --mono:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+    --ink:#07142b; --panel:#0e2145; --panel2:#132a53; --line:#22406f;
+    --text:#f2f6fb; --muted:#9db4d4; --dim:#6b86ad;
+    --green:#4bc26a; --amber:#ffb400; --blue:#4fa8e8; --red:#e8503a;
+    /* 本文はプロポーショナル、数値は等幅のUDフォント */
+    --ja:"BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo",sans-serif;
+    --num:"BIZ UDGothic","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI",monospace;
+    --mono:var(--num);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{background:var(--ink);color:var(--text);
-    font-family:"Hiragino Sans","Noto Sans JP",system-ui,sans-serif;
+    font-family:var(--ja);font-feature-settings:"palt" 1;
+    font-variant-numeric:tabular-nums;
     display:flex;flex-direction:column;overflow:hidden}
 
   /* 上部バー */
   header{display:flex;align-items:center;gap:16px;padding:10px 18px;
     border-bottom:1px solid var(--line);background:var(--panel);flex:none}
-  header h1{font-size:13px;font-weight:600;letter-spacing:.14em;margin:0;text-transform:uppercase}
+  header h1{font-size:15px;font-weight:700;letter-spacing:.18em;margin:0}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
-  .dot.live{background:var(--green);box-shadow:0 0 8px rgba(51,199,110,.7)}
+  .dot.live{background:var(--green);box-shadow:0 0 10px rgba(75,194,106,.9)}
   .dot.warn{background:var(--amber)} .dot.dead{background:var(--red)}
   .spacer{flex:1}
   header .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}
@@ -36,44 +43,44 @@
 
   .col{display:flex;flex-direction:column;gap:14px;min-height:0;overflow:auto}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
-  .card h2{font-size:10px;letter-spacing:.16em;color:var(--muted);margin:0 0 10px;
-    text-transform:uppercase;font-weight:600}
+  .card h2{font-size:12px;letter-spacing:.14em;color:var(--muted);margin:0 0 10px;font-weight:700}
 
   /* 現在値 */
-  .big{font-family:var(--mono);font-size:64px;font-weight:700;line-height:1;color:var(--green);
-    text-align:center;letter-spacing:-.02em}
+  .big{font-family:var(--num);font-size:76px;font-weight:700;line-height:1;color:var(--text);
+    text-align:center;letter-spacing:-.03em;text-shadow:0 2px 12px rgba(0,0,0,.5)}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
-  .big small{font-size:22px;color:var(--muted);margin-left:4px}
-  .trend{text-align:center;font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:8px}
+  .big.normal{color:#ffffff}
+  .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
+  .trend{text-align:center;font-family:var(--num);font-size:15px;font-weight:700;color:var(--muted);margin-top:10px}
   .at{text-align:center;font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:6px}
 
   .kv{display:flex;justify-content:space-between;align-items:baseline;
     padding:6px 0;border-bottom:1px solid rgba(43,55,51,.6);font-size:12px}
   .kv:last-child{border-bottom:none}
-  .kv span{color:var(--muted)}
-  .kv b{font-family:var(--mono);font-size:15px;font-weight:700}
+  .kv span{color:var(--muted);font-weight:500}
+  .kv b{font-family:var(--num);font-size:18px;font-weight:700}
 
   /* グラフ */
   .chartwrap{flex:none;display:flex;flex-direction:column}
   .tabs{display:flex;gap:6px;margin-bottom:10px}
   .tabs button{background:transparent;color:var(--muted);border:1px solid var(--line);
     border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;font-family:inherit}
-  .tabs button.on{background:var(--green);border-color:var(--green);color:#fff;font-weight:600}
+  .tabs button.on{background:var(--amber);border-color:var(--amber);color:#07142b;font-weight:700}
   #chart{width:100%;height:300px;display:block;cursor:crosshair}
 
   /* 表 */
   .tablewrap{flex:1;min-height:0;display:flex;flex-direction:column}
   .scroll{overflow:auto;flex:1;min-height:0}
-  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:13px}
+  table{width:100%;border-collapse:collapse;font-family:var(--num);font-size:15px;font-weight:700}
   thead th{position:sticky;top:0;background:var(--panel2);color:var(--muted);
-    font-size:10px;font-weight:600;letter-spacing:.08em;padding:8px 10px;text-align:right;
+    font-size:12px;font-weight:700;letter-spacing:.06em;padding:9px 10px;text-align:right;
     border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:first-child{text-align:left}
   tbody td{padding:6px 10px;text-align:right;border-bottom:1px solid rgba(43,55,51,.35)}
-  tbody td:first-child{text-align:left;color:var(--muted)}
+  tbody td:first-child{text-align:left;color:var(--muted);font-weight:500}
   tbody tr:hover{background:rgba(255,255,255,.04)}
-  tbody tr.ten td:first-child{color:var(--green);font-weight:700}
-  tbody tr.ten{background:rgba(51,199,110,.09)}
+  tbody tr.ten td:first-child{color:var(--amber);font-weight:700}
+  tbody tr.ten{background:rgba(255,180,0,.10)}
   tbody tr.sel{outline:1px solid var(--amber);outline-offset:-1px}
   .hi{color:var(--amber)} .lo{color:var(--blue)}
   .up{color:var(--amber)} .down{color:var(--blue)} .flat{color:var(--dim)}
@@ -157,6 +164,7 @@
       </div>
       <div class="hint">
         <kbd>R</kbd> 更新　<kbd>F</kbd> 全画面　<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> 表示期間
+        <div style="margin-top:8px">表示中の書体: <span id="fontNow">—</span></div>
       </div>
     </div>
   </div>
@@ -229,7 +237,8 @@ function render(){
   setDot(state==='dead'?'dead' : state?'warn' : (stale?'warn':'live'));
 
   let cls='big';
-  if(state==='hot') cls+=' hot'; else if(state==='cold') cls+=' cold'; else if(stale) cls+=' stale';
+  if(state==='hot') cls+=' hot'; else if(state==='cold') cls+=' cold';
+  else if(stale) cls+=' stale'; else cls+=' normal';
   $('big').className=cls;
   $('big').innerHTML=f1(d.temp)+'<small>°C</small>';
   $('at').textContent=d.at+'　'+d.ageSec+'秒前';
@@ -312,13 +321,13 @@ function drawChart(){
   const Y=v=>H-padB-(H-padB-padT)*((v-lo)/((hi-lo)||1));
   cmap={X,Y,pts,padL,padR,W,H,padT,padB};
 
-  ctx.font='10px '+getComputedStyle(document.body).getPropertyValue('--mono');
+  ctx.font='400 11px "BIZ UDGothic", sans-serif';
   ctx.textBaseline='middle';
   for(let v=lo; v<=hi+step*1e-6; v+=step){
     const y=Y(v);
-    ctx.strokeStyle='#232e2a'; ctx.lineWidth=1;
+    ctx.strokeStyle='#1d3a63'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(padL,Math.round(y)+.5); ctx.lineTo(W-padR,Math.round(y)+.5); ctx.stroke();
-    ctx.fillStyle='#7e8d86'; ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
+    ctx.fillStyle='#9db4d4'; ctx.textAlign='right'; ctx.fillText(v.toFixed(dec),padL-8,y);
   }
   ctx.textAlign='left'; ctx.textBaseline='alphabetic';
 
@@ -326,9 +335,9 @@ function drawChart(){
   pts.forEach((p,i)=>{
     if(!(p.tenMin || Number((p.label||'').split(':')[1])%10===0)) return;
     const x=X(i);
-    ctx.strokeStyle='rgba(51,199,110,.16)'; ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(255,180,0,.22)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(x,padT); ctx.lineTo(x,H-padB); ctx.stroke();
-    ctx.fillStyle='#55625c'; ctx.font='10px monospace';
+    ctx.fillStyle='#6b86ad'; ctx.font='700 11px "BIZ UDGothic", sans-serif';
     ctx.fillText(p.label, x-16, H-8);
   });
 
@@ -341,14 +350,14 @@ function drawChart(){
   });
 
   // 最高〜最低の帯
-  ctx.fillStyle='rgba(51,199,110,.15)';
+  ctx.fillStyle='rgba(79,168,232,.22)';
   ctx.beginPath();
   pts.forEach((p,i)=>{const x=X(i),y=Y(p.max); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
   for(let i=pts.length-1;i>=0;i--) ctx.lineTo(X(i),Y(pts[i].min));
   ctx.closePath(); ctx.fill();
 
   // 平均線
-  ctx.strokeStyle='#33c76e'; ctx.lineWidth=2; ctx.lineJoin='round';
+  ctx.strokeStyle='#ffb400'; ctx.lineWidth=2.5; ctx.lineJoin='round';
   ctx.beginPath();
   pts.forEach((p,i)=>{const x=X(i),y=Y(p.avg); i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
   ctx.stroke();
@@ -361,29 +370,31 @@ function drawChart(){
   });
 
   const last=pts[pts.length-1];
-  ctx.fillStyle='#33c76e';
-  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),4,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#ffb400';
+  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),5,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#07142b';
+  ctx.beginPath(); ctx.arc(X(pts.length-1),Y(last.avg),2,0,Math.PI*2); ctx.fill();
 
   // 触っている位置
   if(hover!==null && hover>=0 && hover<pts.length){
     const p=pts[hover], hx=X(hover), hy=Y(p.avg);
-    ctx.strokeStyle='rgba(232,178,48,.85)'; ctx.lineWidth=1;
+    ctx.strokeStyle='rgba(242,246,251,.8)'; ctx.lineWidth=1;
     ctx.beginPath(); ctx.moveTo(hx,padT); ctx.lineTo(hx,H-padB); ctx.stroke();
-    ctx.fillStyle='#e8b230';
-    ctx.beginPath(); ctx.arc(hx,hy,4.5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#f2f6fb';
+    ctx.beginPath(); ctx.arc(hx,hy,5,0,Math.PI*2); ctx.fill();
     const lines=[p.label+'　'+f1(p.avg)+'°C',
                  '最高 '+f1(p.max)+'　最低 '+f1(p.min),
                  '10秒値 '+(p.cnt||0)+' 個'+((p.cnt||0)<6?'（欠測）':'')];
-    ctx.font='12px '+getComputedStyle(document.body).getPropertyValue('--mono');
+    ctx.font='700 13px "BIZ UDGothic", sans-serif';
     const bw=Math.max(...lines.map(l=>ctx.measureText(l).width))+16;
     const bh=lines.length*17+10;
     let bx=Math.min(W-padR-bw, Math.max(padL, hx-bw/2));
     let by=hy-bh-14; if(by<padT) by=hy+14;
-    ctx.fillStyle='rgba(11,15,13,.95)'; ctx.fillRect(bx,by,bw,bh);
-    ctx.strokeStyle='#2b3733'; ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
+    ctx.fillStyle='rgba(7,20,43,.96)'; ctx.fillRect(bx,by,bw,bh);
+    ctx.strokeStyle='#22406f'; ctx.strokeRect(bx+.5,by+.5,bw-1,bh-1);
     ctx.textBaseline='middle';
     lines.forEach((l,i)=>{
-      ctx.fillStyle = i===0 ? '#dfe6e1' : '#7e8d86';
+      ctx.fillStyle = i===0 ? '#ffb400' : '#9db4d4';
       ctx.fillText(l, bx+8, by+16+i*17);
     });
     ctx.textBaseline='alphabetic';
@@ -501,6 +512,27 @@ setInterval(()=>{
 }, 500);
 window.addEventListener('resize', ()=>{ drawChart(); });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
+
+// どの書体が実際に使われているか判定する
+(function(){
+  const el=$('fontNow'); if(!el) return;
+  const test=document.createElement('span');
+  test.style.cssText='position:absolute;visibility:hidden;font-size:64px';
+  test.textContent='気温あア0123';
+  document.body.appendChild(test);
+  const widthOf=f=>{ test.style.fontFamily=f; return test.getBoundingClientRect().width; };
+  const base=widthOf('serif');
+  const cands=[['BIZ UDPゴシック','"BIZ UDPGothic", serif'],
+               ['BIZ UDゴシック','"BIZ UDGothic", serif'],
+               ['ヒラギノ角ゴ','"Hiragino Sans", serif'],
+               ['游ゴシック','"Yu Gothic UI", serif']];
+  let found='端末の既定ゴシック';
+  for(const [name,stack] of cands){
+    if(Math.abs(widthOf(stack)-base)>0.5){ found=name; break; }
+  }
+  test.remove();
+  el.textContent=found;
+})();
 
 load();
 restartPoll();
