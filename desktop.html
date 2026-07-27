@@ -156,6 +156,12 @@
   .grid2 .g b{font-family:var(--num);font-size:16px;font-weight:700;line-height:1;
     display:inline-flex;align-items:baseline}
 
+  /* 記録した時刻 */
+  .grid2 .g > .rec{display:block;font-style:normal;font-family:var(--num);font-size:11px;
+    font-weight:700;color:var(--label);margin-top:2px;white-space:nowrap}
+  .kCards .rec{display:block;font-style:normal;font-family:var(--num);
+    font-size:clamp(10px,1vw,13px);color:var(--kSoft);margin-top:4px}
+
   /* 設定は重ねて出す */
   #setOverlay{display:none;position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);
     align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto}
@@ -243,8 +249,8 @@
 
     <div class="card">
       <div class="grid2">
-        <div class="g"><span>全期間 最高</span><b class="hi" id="allMax">-</b></div>
-        <div class="g"><span>全期間 最低</span><b class="lo" id="allMin">-</b></div>
+        <div class="g"><span>全期間 最高</span><b class="hi" id="allMax">-</b><i class="rec" id="allMaxAt"></i></div>
+        <div class="g"><span>全期間 最低</span><b class="lo" id="allMin">-</b><i class="rec" id="allMinAt"></i></div>
         <div class="g"><span>1時間 最高</span><b class="hi" id="h1max">-</b></div>
         <div class="g"><span>1時間 最低</span><b class="lo" id="h1min">-</b></div>
         <div class="g"><span>1時間 平均</span><b id="h1avg">-</b></div>
@@ -342,8 +348,8 @@
   <div class="kSub" id="kSub"></div>
   <canvas id="kSpark"></canvas>
   <div class="kCards">
-    <div><span>全期間 最高</span><b id="kMax">-</b></div>
-    <div><span>全期間 最低</span><b id="kMin">-</b></div>
+    <div><span>全期間 最高</span><b id="kMax">-</b><i class="rec" id="kMaxAt"></i></div>
+    <div><span>全期間 最低</span><b id="kMin">-</b><i class="rec" id="kMinAt"></i></div>
     <div><span>10分の変化</span><b id="kTrend">-</b></div>
     <div><span>1時間の幅</span><b id="kRange">-</b></div>
     <div><span>次の区分まで</span><b id="kNext">-</b></div>
@@ -379,7 +385,8 @@ const f1 = v => (Math.round(v*10)/10).toFixed(1);
 /* ---------- 取得 ---------- */
 async function load(){
   const url=endpoint();
-  if(!url){ $('setOverlay').classList.add('on'); $('hdrMeta').textContent='接続先が未設定'; return; }
+  if(!url){ $('setOverlay').classList.add('on');
+            $('hdrMeta')._frame=false; $('hdrMeta').textContent='接続先が未設定'; return; }
   if(Date.now()<backoffUntil) return;          // 失敗直後は間隔をあける
   try{
     const sep=url.includes('?')?'&':'?';
@@ -394,10 +401,12 @@ async function load(){
     }
     if(!d.ok) throw new Error(d.error||'応答が不正');
     failStreak=0; backoffUntil=0;
-    if(d.empty){ $('hdrMeta').textContent='まだ記録がありません'; setDot('warn'); return; }
+    if(d.empty){ $('hdrMeta')._frame=false;
+                 $('hdrMeta').textContent='まだ記録がありません'; setDot('warn'); return; }
     data=d; render();
   }catch(e){
     const msg=String(e && e.message ? e.message : e);
+    $('hdrMeta')._frame=false;
     $('hdrMeta').innerHTML='<span class="err">読み込めません: '+msg.slice(0,200)+'</span>';
     setDot('dead');
     console.error('load失敗', e);
@@ -413,6 +422,52 @@ async function load(){
 }
 function setDot(c){ $('dot').className='dot'+(c?' '+c:''); }
 
+/* ---------- 記録した時刻 ----------
+   サーバが時刻を返していればそれを使う。返していない場合は、
+   見ている間に記録が更新された瞬間を覚えておいて代わりに出す */
+const K_REC='templogger:records';
+function hhmm(v){
+  if(v===undefined || v===null || v==='') return '';
+  const s=String(v);
+  const p=n=>('0'+n).slice(-2);
+  // 秒があれば秒まで出す
+  const m=s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(m) return p(m[1])+':'+m[2]+(m[3]?':'+m[3]:'');
+  const t=new Date(s);
+  if(!isNaN(t.getTime())) return p(t.getHours())+':'+p(t.getMinutes())+':'+p(t.getSeconds());
+  return '';
+}
+function recordTimes(d){
+  const pick=(...ks)=>{
+    for(const k of ks){ const v=d[k]; if(v!==undefined && v!==null && v!=='') return v; }
+    return null;
+  };
+  const fromServer={
+    hi: hhmm(pick('allMaxAt','maxAt','allMaxTime','hiAt')),
+    lo: hhmm(pick('allMinAt','minAt','allMinTime','loAt'))
+  };
+  let st={};
+  try{ st=JSON.parse(localStorage.getItem(K_REC)||'{}'); }catch(e){}
+  const now=hhmm(d.at) || hhmm(new Date());
+  // 初回は値だけ覚える（そのときの時刻は分からないので時刻は入れない）
+  if(!isFinite(st.max)){ st.max=d.allMax; }
+  else if(d.allMax > st.max+1e-9){ st.max=d.allMax; st.maxAt=now; }
+  if(!isFinite(st.min)){ st.min=d.allMin; }
+  else if(d.allMin < st.min-1e-9){ st.min=d.allMin; st.minAt=now; }
+  try{ localStorage.setItem(K_REC, JSON.stringify(st)); }catch(e){}
+  return { hi: fromServer.hi || st.maxAt || '', lo: fromServer.lo || st.minAt || '' };
+}
+function setRec(id, t, paren){
+  const e=$(id); if(!e) return;
+  setVal(e, t ? (paren ? '('+t+')' : t) : '--:--', 500);
+}
+// 時刻表示の骨組み。中身を作り直すのは一度だけで、以降は数字だけ差し替える
+function frame(el, html){
+  if(!el) return false;
+  if(!el._frame){ el.innerHTML=html; el._frame=true; }
+  return true;
+}
+
 /* ---------- 描画 ---------- */
 function render(){
   const d=data;
@@ -427,8 +482,16 @@ function render(){
   bw.className=cls; bw.classList.remove('stale');
   if(state==='') bw.classList.add('normal');
   setNum($('bigNum'), f1(d.temp), d.temp);
-  $('at').textContent=d.at+'　'+d.ageSec+'秒前';
-  $('hdrMeta').textContent='最終記録 '+d.at;
+  if(frame($('at'), '<span id="atDate"></span><span id="atTime"></span>'
+         + '<span>　</span><span id="atAge"></span><span>秒前</span>')){
+    $('atDate').textContent=d.at.slice(0,11);
+    setVal($('atTime'), d.at.slice(11), 300);
+    setVal($('atAge'), String(d.ageSec), 300);
+  }
+  if(frame($('hdrMeta'), '<span>最終記録 </span><span id="hdrDate"></span><span id="hdrTime"></span>')){
+    $('hdrDate').textContent=d.at.slice(0,11);
+    setVal($('hdrTime'), d.at.slice(11), 300);
+  }
 
   const m=d.minutes||[];
   if(m.length>=11){
@@ -448,6 +511,9 @@ function render(){
 
   setVal($('allMax'), f1(d.allMax));
   setVal($('allMin'), f1(d.allMin));
+  const rec=recordTimes(d);
+  setRec('allMaxAt', rec.hi, true);  setRec('allMinAt', rec.lo, true);
+  setRec('kMaxAt',   rec.hi, false); setRec('kMinAt',   rec.lo, false);
   setVal($('cnt'), (d.count||0).toLocaleString()+' / '+(d.rawCount||0).toLocaleString());
 
   // 直近1時間の統計
@@ -1062,8 +1128,12 @@ function renderKiosk(){
   badge.style.background = 'rgba('+cssv('--kfgRGB')+(band.t>=25 ? ',.18)' : ',.10)');
 
   setNum($('kBigNum'), f1(d.temp), d.temp);
-  $('kSub').textContent=d.at.slice(11)+'　'+d.ageSec+'秒前'
-    + (d.ageSec>600 ? '　※更新が止まっています' : '');
+  if(frame($('kSub'), '<span id="kSubT"></span><span>　</span>'
+         + '<span id="kSubAge"></span><span>秒前</span><span id="kSubWarn"></span>')){
+    setVal($('kSubT'), d.at.slice(11), 300);
+    setVal($('kSubAge'), String(d.ageSec), 300);
+    $('kSubWarn').textContent = d.ageSec>600 ? '　※更新が止まっています' : '';
+  }
 
   const m=d.minutes||[];
   let diff=null;
@@ -1213,7 +1283,9 @@ $('btnSave').onclick=()=>{
   cfg.bgOn=$('bgOn').checked;
   cfg.odo=$('odoOn').checked;
   ['bigNum','kBigNum','allMax','allMin','cnt','h1max','h1min','h1avg','h1range','h1gap',
-   'kTrend','kMax','kMin','kRange','kNext','kClock','ladderNextV','trVal'].forEach(id=>{
+   'kTrend','kMax','kMin','kRange','kNext','kClock','ladderNextV','trVal',
+   'atTime','atAge','hdrTime','cdVal','kSubT','kSubAge',
+   'allMaxAt','allMinAt','kMaxAt','kMinAt'].forEach(id=>{
     const e=$(id); if(e){ e._slots=null; e._text=undefined; e._v=undefined; }
   });
   localStorage.setItem(K_SET, JSON.stringify(cfg));
@@ -1271,7 +1343,8 @@ function restartPoll(){
 }
 setInterval(()=>{
   const left=Math.max(0, Math.ceil((nextAt-Date.now())/1000));
-  $('countdown').textContent='次の更新 '+left+'s';
+  if(frame($('countdown'), '<span>次の更新 </span><span id="cdVal"></span><span>s</span>'))
+    setVal($('cdVal'), String(left), 250);
 }, 500);
 window.addEventListener('resize', ()=>{ drawChart(); drawSpark(); });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) load(); });
