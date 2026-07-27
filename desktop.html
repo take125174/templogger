@@ -58,14 +58,18 @@
   .odo.odo .slot,.odo.odo .fixed{
     flex:0 0 auto;margin:0;padding:0;font-size:inherit;
     color:inherit;opacity:1;letter-spacing:inherit}
-  .odo.odo .slot{position:relative;display:inline-block;overflow:hidden;
-    width:.62em;height:1em;line-height:1em;text-align:center}  /* 実測できたら px で上書き */
+  /* 幅と行の高さは odoBuild が実測して --odoW / --odoH に入れる。
+     測れないときだけ em の既定値を使う */
+  .odo.odo .slot{position:relative;display:inline-block;overflow:hidden;text-align:center;
+    width:var(--odoW,.62em);height:var(--odoH,1em);line-height:var(--odoH,1em)}
   .odo.odo .slot::after{content:"0";visibility:hidden} /* 透明な数字で基準線を作る */
   .odo.odo .strip{display:block;position:absolute;left:0;top:0;width:100%;
     margin:0;padding:0;font-size:inherit;color:inherit;opacity:1;will-change:transform}
-  .odo.odo .strip>span{display:block;height:1em;line-height:1em;text-align:center;
+  .odo.odo .strip>span{display:block;text-align:center;
+    height:var(--odoH,1em);line-height:var(--odoH,1em);
     margin:0;padding:0;font-size:inherit;color:inherit;opacity:1}
-  .odo.odo .fixed{display:inline-block;line-height:1em;white-space:pre;text-align:center}
+  .odo.odo .fixed{display:inline-block;line-height:var(--odoH,1em);
+    white-space:pre;text-align:center}
   input,select,button,option{text-shadow:none}
   main{flex:1;display:grid;grid-template-columns:300px 1fr;gap:14px;padding:14px;overflow:hidden}
   @media (max-width:900px){ main{grid-template-columns:1fr;overflow:auto} }
@@ -858,30 +862,66 @@ function drawTable(){
 const REPEAT=3, MID=10, ROWS=REPEAT*10;
 const odoY = n => 'translateY('+(-(MID+n)*100/ROWS)+'%)';
 
-// 1文字ぶんの送り幅（字間込み）を実測する。
-// "00" と "0" の差をとることで、書体の送り幅と letter-spacing の両方を拾える
-function odoStep(el){
-  if(!el.getClientRects().length) return 0;        // 表示されていないと測れない
+// 素のテキストで書いたときと同じ見た目にするため、寸法を実測する。
+//   送り幅 … "00" と "0" の差。書体の送りと letter-spacing の両方を拾える
+//   行の高さ … 1文字ぶんの行ボックスの高さ。これを揃えないと数字だけ上下に浮く
+function odoMetrics(el){
+  if(!el.getClientRects().length) return null;     // 表示されていないと測れない
+  // 自分がかけている line-height を一旦外し、素のテキストと同じ条件で測る
+  const had=el.classList.contains('odo');
+  if(had) el.classList.remove('odo');
+  el.style.removeProperty('--odoW');
+  el.style.removeProperty('--odoH');
   const probe=document.createElement('span');
-  probe.style.cssText='position:absolute;visibility:hidden;white-space:pre;top:0;left:-9999px';
+  probe.style.cssText='position:absolute;visibility:hidden;white-space:pre;'
+                    + 'display:inline-block;top:0;left:-9999px';
   probe.textContent='0';
   el.appendChild(probe);
-  const w1=probe.getBoundingClientRect().width;
+  const r1=probe.getBoundingClientRect();
   probe.textContent='00';
   const w2=probe.getBoundingClientRect().width;
   probe.remove();
-  const step=w2-w1;
-  return step>0.5 ? step : w1;
+  if(had) el.classList.add('odo');
+  const step=w2-r1.width;
+  if(!(step>0.5) || !(r1.height>0.5)) return null;
+  return {step:step, line:r1.height};
+}
+// 実際に描かれた数字の基準線と、周囲の素のテキストの基準線のずれを測って打ち消す。
+// 大きさ0のインラインブロックはちょうど基準線に乗るので、それを目印に使う。
+// 基準線の決め方はブラウザの内部仕様に左右されるため、計算ではなく描画結果から求める
+function odoAlign(el){
+  const s0=(el._slots||[]).find(s=>s.kind==='d');
+  if(!s0 || !el.parentNode || !el.getClientRects().length) return;
+  el.style.top='';                                  // いったん補正を外して測る
+  const row=s0.strip.children[MID+s0.d];            // いま見えている行
+  if(!row) return;
+  const mk=()=>{ const m=document.createElement('span');
+                 m.style.cssText='display:inline-block;width:0;height:0'; return m; };
+  const a=mk(); row.appendChild(a);
+  const mine=a.getBoundingClientRect().top; a.remove();
+  const b=mk(); el.parentNode.insertBefore(b, el);
+  const base=b.getBoundingClientRect().top; b.remove();
+  const d=base-mine;                                // 正なら数字が上に寄っている
+  if(isFinite(d) && Math.abs(d)>0.05){
+    el.style.position='relative';                   // 配置は変えずに見た目だけ動かす
+    el.style.top=d.toFixed(3)+'px';
+  }
 }
 function odoBuild(el, text){
+  const m=odoMetrics(el);                          // null なら測れていない（非表示など）
   el.classList.add('odo');
   el.innerHTML=''; el._slots=[];
-  const step=odoStep(el);
-  el._step=step;                                   // 0 なら測れていない（非表示など）
+  el._step=m ? m.step : 0;
+  if(m){
+    el.style.setProperty('--odoW', m.step+'px');
+    el.style.setProperty('--odoH', m.line+'px');
+  } else {
+    el.style.removeProperty('--odoW');
+    el.style.removeProperty('--odoH');
+  }
   for(const ch of text){
     if(ch>='0' && ch<='9'){
       const slot=document.createElement('span'); slot.className='slot';
-      if(step) slot.style.width=step+'px';        // 測れなければ CSS の既定に任せる
       const strip=document.createElement('span'); strip.className='strip';
       for(let r=0;r<REPEAT;r++) for(let d=0;d<10;d++){
         const x=document.createElement('span');
@@ -897,6 +937,7 @@ function odoBuild(el, text){
       el.appendChild(f); el._slots.push({el:f, kind:'f', ch});
     }
   }
+  odoAlign(el);
   el._text=text;
 }
 function odoSet(el, text, dir, ms){
