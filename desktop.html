@@ -31,7 +31,6 @@
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{background:var(--ink);color:var(--text);transition:background 1.2s ease,color 1.2s ease;
-    text-shadow:0 1px 2px var(--shadow);
     font-family:var(--ja);font-feature-settings:"palt" 1;
     font-variant-numeric:tabular-nums;
     display:flex;flex-direction:column;overflow:hidden}
@@ -54,7 +53,8 @@
   /* オードメーター表示
      .grid2 .g span のような一般的な子孫セレクタに負けて桁送りが壊れたことがあるため、
      クラスを二重に書いて詳細度を上げ、寸法に関わる指定は必ず自分で持つ */
-  .odo.odo{display:inline-flex;align-items:baseline;line-height:1;white-space:nowrap}
+  .odo.odo{display:inline-flex;align-items:baseline;line-height:1;white-space:nowrap;
+    text-shadow:none}
   .odo.odo .slot,.odo.odo .fixed{
     flex:0 0 auto;margin:0;padding:0;font-size:inherit;
     color:inherit;opacity:1;letter-spacing:inherit}
@@ -77,7 +77,7 @@
 
   /* 現在値 */
   .big{font-family:var(--num);font-size:clamp(48px,4.4vw,68px);font-weight:700;line-height:1;
-    color:var(--text);text-align:center;letter-spacing:-.03em;text-shadow:0 3px 14px var(--shadow)}
+    color:var(--text);text-align:center;letter-spacing:-.03em}
   .big.hot{color:var(--amber)} .big.cold{color:var(--blue)} .big.stale{color:var(--dim)}
   .big.normal{color:var(--text)}
   .big small{font-size:26px;color:var(--muted);margin-left:6px;font-weight:700}
@@ -190,11 +190,13 @@
   .kDate{font-family:var(--num);font-size:clamp(20px,2.4vw,34px);color:var(--kSoft);
     letter-spacing:.04em;display:inline-flex;align-items:baseline}
   .kBadge{font-size:clamp(18px,2.2vw,30px);font-weight:700;padding:6px 20px;border-radius:999px;
-    background:rgba(var(--kfgRGB),.14);color:var(--kfg);letter-spacing:.1em;
-    text-shadow:0 2px 6px var(--kshadow)}
-  .kMain{display:flex;align-items:center;gap:20px}
+    background:rgba(var(--kfgRGB),.14);color:var(--kfg);letter-spacing:.1em}
+  .kMain{display:flex;align-items:center;gap:20px;
+    /* text-shadow だと桁の窓で切られて四角く残る。
+       drop-shadow は切り抜いた後の形に対してかかるので滲みが自然に出る */
+    filter:drop-shadow(0 6px 40px var(--kshadow))}
   .kBig{font-family:var(--num);font-size:clamp(120px,25vw,320px);font-weight:700;line-height:.95;
-    color:var(--kfg);letter-spacing:-.04em;text-shadow:0 6px 40px var(--kshadow)}
+    color:var(--kfg);letter-spacing:-.04em}
   .kBig .u{font-size:.3em;margin-left:.06em;color:var(--kSoft)}
   .kArrow{font-size:clamp(40px,7vw,90px);line-height:1;opacity:.85}
   .kSub{font-family:var(--num);font-size:clamp(14px,1.6vw,22px);color:var(--kSoft)}
@@ -205,7 +207,8 @@
      span まで巻き込んで、数字と小数点で色が割れる */
   .kCards div > span{display:block;font-size:clamp(11px,1.05vw,14px);color:var(--kSoft);margin-bottom:5px}
   .kCards b{font-family:var(--num);font-size:clamp(22px,2.8vw,38px);font-weight:700;color:var(--kfg);
-    text-shadow:0 2px 8px var(--kshadow);display:inline-flex;align-items:baseline;justify-content:center}
+    display:inline-flex;align-items:baseline;justify-content:center;
+    filter:drop-shadow(0 2px 8px var(--kshadow))}
   .kHint{position:absolute;bottom:20px;font-size:12px;color:var(--kFaint)}
   @keyframes pulse{0%,100%{opacity:.85}50%{opacity:.35}}
   .kBadge.alert{animation:pulse 2.4s ease-in-out infinite}
