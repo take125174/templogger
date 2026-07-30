@@ -152,6 +152,35 @@
 </div>
 
 <div class="card">
+  <div class="eyebrow">暗いところ対策</div>
+  <label class="ctl"><span>明るさへの追従</span>
+    <select id="llMode">
+      <option value="auto" selected>自動（おまかせ）</option>
+      <option value="0">切</option>
+      <option value="1">手動・明暗を伸ばす</option>
+      <option value="2">手動・照明ムラも消す</option>
+    </select>
+  </label>
+  <label class="ctl"><span>時間平均</span>
+    <select id="llAvg">
+      <option value="auto" selected>自動</option>
+      <option value="1">しない</option>
+      <option value="4">4枚</option>
+      <option value="8">8枚</option>
+      <option value="16">16枚</option>
+    </select>
+  </label>
+  <label class="ctl" id="expoAutoRow" style="display:none"><span>露出の自動調整</span>
+    <select id="expoAuto"><option value="1" selected>する</option><option value="0">しない</option></select>
+  </label>
+  <label class="ctl" id="expoRow" style="display:none"><span>露出</span><input type="range" id="expo" min="0" max="100" value="50"><output id="expoV">0</output></label>
+  <div class="row" id="torchRow" style="display:none"><button id="btnTorch">ライトを点ける</button></div>
+  <div class="row"><button id="btnDiag">今の見え方を診断</button></div>
+  <div class="note" id="llAuto">自動調整の状態：カメラ待ち</div>
+  <div class="note" id="llState">日光の入り具合が変わっても設定を触らずに済むよう、平均枚数・露出・明るさの基準を自動で調節し続けます。校正は一度だけで構いません。</div>
+</div>
+
+<div class="card">
   <div class="eyebrow">設定</div>
   <label class="ctl"><span>記録間隔</span>
     <select id="interval">
@@ -243,7 +272,7 @@
   <div class="eyebrow">長時間記録のコツ</div>
   <div class="note">
     充電器につないだまま、スマホと温度計を両方とも動かないよう固定してください。記録中は画面の自動消灯を止めます（Wake Lock）が、他のアプリに切り替えるとカメラが止まります。<br>
-    データは自動保存され、閉じても次に開いたとき復元されます。照明が変わると読めなくなることがあるので、直射日光や影の動く場所は避けてください。
+    データは自動保存され、閉じても次に開いたとき復元されます。照明が変わると読めなくなることがあるので、直射日光や影の動く場所は避けてください。<br>明るさへの追従を「自動」にしておけば、日が差しても陰っても設定を触る必要はありません。平均枚数と露出、明るさの基準を裏で調節し続けます。校正は最初の一度だけで構いません。<br>ただし温度計とスマホが動くと合わなくなります。両方をしっかり固定してください。
   </div>
 </div>
 
@@ -308,6 +337,7 @@ async function initCamera(){
     $('alert').style.display='none';
     $('btnCam').textContent='カメラを開き直す';
     setupZoom(stream);
+    setupLowLight(stream);
     drawOverlay();
   }catch(e){
     showAlert('カメラを開けません（' + e.name + '）。「カメラを開始」をもう一度押すか、Safariの設定でこのサイトのカメラを「許可」にしてください。');
@@ -346,6 +376,42 @@ if($('zoom')) $('zoom').addEventListener('input', ()=>{
   // ズームすると画角が変わるので、追従をやり直す
   if(typeof resetTracking==='function') resetTracking();
 });
+
+/* ---------- 露出とライト ----------
+   対応は機種によって違う。使える機能だけを表に出す（iPhoneのSafariは多くが非対応） */
+let expoTrack=null, torchTrack=null, torchOn=false;
+function setupLowLight(stream){
+  expoTrack=null; torchTrack=null; torchOn=false;
+  $('expoRow').style.display='none'; $('torchRow').style.display='none';
+  $('expoAutoRow').style.display='none';
+  try{
+    const tr=stream.getVideoTracks()[0];
+    const caps=tr.getCapabilities ? tr.getCapabilities() : {};
+    if(caps && caps.exposureCompensation){
+      expoTrack=tr;
+      const e=$('expo'), c=caps.exposureCompensation;
+      e.min=Math.round(c.min*100); e.max=Math.round(c.max*100);
+      e.step=Math.max(1, Math.round((c.step||0.1)*100));
+      const cur=(tr.getSettings && tr.getSettings().exposureCompensation);
+      e.value=Math.round((cur===undefined?0:cur)*100);
+      $('expoV').textContent=(e.value/100).toFixed(1);
+      $('expoRow').style.display=''; $('expoAutoRow').style.display='';
+    }
+    if(caps && caps.torch){ torchTrack=tr; $('torchRow').style.display=''; }
+  }catch(e){}
+}
+if($('expo')) $('expo').addEventListener('input', ()=>{
+  const v=Number($('expo').value)/100;
+  $('expoV').textContent=v.toFixed(1);
+  if(expoTrack) expoTrack.applyConstraints({advanced:[{exposureCompensation:v}]}).catch(()=>{});
+});
+if($('btnTorch')) $('btnTorch').onclick=()=>{
+  if(!torchTrack) return;
+  torchOn=!torchOn;
+  torchTrack.applyConstraints({advanced:[{torch:torchOn}]})
+    .then(()=>{ $('btnTorch').textContent = torchOn ? 'ライトを消す' : 'ライトを点ける'; })
+    .catch(()=>{ torchOn=!torchOn; });
+};
 
 /* ---------- ROI 操作 ---------- */
 function fitOverlay(){
@@ -497,13 +563,20 @@ function detectWindow(){
   const d=sctx.getImageData(0,0,W,H).data;
   const N=W*H;
   const green=new Uint8Array(N), lum=new Uint8Array(N);
-  let gc=0;
+  const gd=new Int16Array(N);
   for(let i=0;i<N;i++){
     const r=d[i*4], g=d[i*4+1], b=d[i*4+2];
     lum[i]=(r*0.299+g*0.587+b*0.114)|0;
-    if(g-r>20 && g-b>20){ green[i]=1; gc++; }
+    gd[i]=Math.min(g-r, g-b);          // 緑らしさ。暗いほど小さくなる
   }
-  if(gc < N*0.01) return null;
+  // 暗い場所では色の差が縮む。見つかるまでしきい値を段階的に下げる
+  let gc=0;
+  for(const t of [20,14,10,7,5]){
+    gc=0; green.fill(0);
+    for(let i=0;i<N;i++) if(gd[i]>t){ green[i]=1; gc++; }
+    if(gc >= N*0.01) break;
+  }
+  if(gc < N*0.006) return null;
   const G=labelMask(green,W,H);
   let body=null;
   for(const c of G.comps) if(!body || c.area>body.area) body=c;
@@ -618,25 +691,257 @@ function effectiveRect(){
   return {x:rx, y:ry, w:rw, h:rh};
 }
 
-function grabROI(){
+/* ---------- 暗いところ対策 ----------
+   暗い部屋では次の3つが同時に起こる。
+   1) 数字の明暗差が小さい（実測で36/255ほどしかない）
+   2) 増感でざらつく（ノイズが±15ほど乗り、明暗差の半分近くを占める）
+   3) 光の当たり方が左右で偏る（実測で13/255の傾き）
+   そこで「何枚も足して2を消す」「大きなぼかしを引いて3を消す」
+   「残った1を目いっぱい引き伸ばす」の順で処理する */
+
+// 切り出す位置と大きさ。平均用の連写と本番の読み取りで必ず同じ値を使う
+function roiSpec(){
   const vw = video.videoWidth, vh = video.videoHeight;
   if(!vw) return null;
   const E = effectiveRect();
-  const rx=E.x, ry=E.y, rw=E.w, rh=E.h;
-  const sx=Math.round(rx*vw), sy=Math.round(ry*vh);
-  const sw=Math.max(8,Math.round(rw*vw)), sh=Math.max(8,Math.round(rh*vh));
+  const sx=Math.round(E.x*vw), sy=Math.round(E.y*vh);
+  const sw=Math.max(8,Math.round(E.w*vw)), sh=Math.max(8,Math.round(E.h*vh));
   // 高さを基準に拡大する。横長の枠でも数字の解像度が落ちない
   let th=90, tw=Math.max(8, Math.round(sw*th/sh));
   if(tw>640){ tw=640; th=Math.max(8, Math.round(sh*640/sw)); }
-  work.width=tw; work.height=th;
-  wctx.drawImage(video, sx,sy,sw,sh, 0,0,tw,th);
-  const imgData = wctx.getImageData(0,0,tw,th);
-  const img = imgData.data;
-  const gray = new Uint8Array(tw*th);
-  for(let i=0;i<tw*th;i++){
-    gray[i] = (img[i*4]*0.299 + img[i*4+1]*0.587 + img[i*4+2]*0.114)|0;
+  return {sx,sy,sw,sh,tw,th, key:[sx,sy,sw,sh,tw,th].join(',')};
+}
+function captureGray(spec){
+  work.width=spec.tw; work.height=spec.th;
+  wctx.drawImage(video, spec.sx,spec.sy,spec.sw,spec.sh, 0,0,spec.tw,spec.th);
+  const imgData=wctx.getImageData(0,0,spec.tw,spec.th);
+  const img=imgData.data, n=spec.tw*spec.th;
+  const g=new Float32Array(n);
+  for(let i=0;i<n;i++) g[i]=img[i*4]*0.299 + img[i*4+1]*0.587 + img[i*4+2]*0.114;
+  return {g, raw:imgData};
+}
+
+// 直近の数フレームを溜めておく置き場。読み取りの瞬間に慌てて連写しても
+// 動画は1/30秒ごとにしか更新されないので、裏で常に貯めておく
+/* ---------- 自動調節 ----------
+   日が差したり陰ったりすると、明るさもノイズも刻々と変わる。
+   人が設定を変えなくて済むよう、次の3つを裏で回し続ける。
+   ・平均枚数：ノイズが明暗差の1/10以下に収まる枚数を選ぶ
+   ・露出：液晶が明るすぎ／暗すぎない範囲に入るようカメラ側を動かす（対応機種のみ）
+   ・明るさの基準：読み取りに成功するたび、ゆっくり今の光に合わせ直す
+   一方、ムラ補正は常に入れておく。途中で入切すると明るさの基準がずれるため */
+const LADDER=[1,2,4,8,16];
+const AUTO = { avg:4, mode:2, span:0, noise:0, level:0, at:0, expoAt:0, changed:false };
+function isAutoAvg(){ return (($('llAvg')||{}).value)==='auto'; }
+function isAutoMode(){ return (($('llMode')||{}).value)==='auto'; }
+const RING = { key:'', frames:[], t:0 };
+function llAvgN(){
+  if(isAutoAvg()) return AUTO.avg;
+  return Number(($('llAvg')||{}).value || 1) || 1;
+}
+function llMode(){
+  if(isAutoMode()) return 2;                       // 自動のときはムラ補正を常時入れる
+  return Number(($('llMode')||{}).value || 0) || 0;
+}
+// 自動のときは判断材料が要るので、使う枚数より多めに溜めておく
+function ringCap(){ return (isAutoAvg() || llAvgN()>1) ? 16 : 0; }
+let lastUiAt=Date.now(), ringPhase=0;
+for(const ev of ['pointerdown','change','input'])
+  document.addEventListener(ev, ()=>{ lastUiAt=Date.now(); }, true);
+function ringTick(){
+  if(!video.videoWidth || document.visibilityState!=='visible') return;
+  // 記録中でも操作中でもないときは、貯め続けなくてよい（電池のため）
+  if(!S.running && Date.now()-lastUiAt>60000) return;
+  const cap=ringCap();
+  if(cap<=0){ RING.frames.length=0; RING.key=''; return; }
+  // 少ない枚数で足りている明るさなら、撮る回数も減らす
+  ringPhase++;
+  if(llAvgN()<=2 && RING.frames.length>=4 && ringPhase%3) return;
+  const spec=roiSpec(); if(!spec) return;
+  if(RING.key!==spec.key){ RING.key=spec.key; RING.frames.length=0; }  // 枠が動いたら貯め直す
+  RING.frames.push(captureGray(spec).g);
+  while(RING.frames.length>cap) RING.frames.shift();
+  RING.t=Date.now();
+}
+setInterval(ringTick, 60);
+
+// 直近の画像から、明るさ・明暗の幅・ノイズを測る
+function measureLight(){
+  const fs=RING.frames;
+  if(fs.length<2) return null;
+  const n=fs[0].length, k=Math.min(8, fs.length);
+  const avg=new Float32Array(n);
+  for(let j=fs.length-k;j<fs.length;j++){ const f=fs[j]; for(let i=0;i<n;i++) avg[i]+=f[i]; }
+  for(let i=0;i<n;i++) avg[i]/=k;
+  const last=fs[fs.length-1];
+  let d=0, sum=0;
+  for(let i=0;i<n;i++){ d+=Math.abs(last[i]-avg[i]); sum+=avg[i]; }
+  // 1枚と平均のズレ＝1枚あたりのノイズ（平均ぶんの目減りを戻す）
+  const noise=(d/n)*1.25*Math.sqrt(k/Math.max(1,k-1));
+  const hist=new Int32Array(256);
+  for(let i=0;i<n;i++){ const v=avg[i]; hist[v<0?0:v>255?255:v|0]++; }
+  let acc=0, lo=0, hi=255;
+  for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>=n*0.02){ lo=v; break; } }
+  acc=0;
+  for(let v=255;v>=0;v--){ acc+=hist[v]; if(acc>=n*0.02){ hi=v; break; } }
+  return { level:sum/n, span:Math.max(1,hi-lo), noise };
+}
+
+function updateAuto(){
+  if(!video.videoWidth || document.visibilityState!=='visible') return;
+  const spec=roiSpec();
+  if(!spec || RING.key!==spec.key) return;
+  const m=measureLight();
+  if(!m) return;
+  AUTO.level=m.level; AUTO.span=m.span; AUTO.noise=m.noise;
+  autoExposure(m.level);
+  if(isAutoAvg()){
+    // ノイズを√枚数ぶん減らす。明暗の幅の1/10に収まる最小の枚数を選ぶ
+    const target=Math.max(2, m.span/10);
+    const needed=Math.pow(m.noise/target, 2);
+    let want=LADDER[LADDER.length-1];
+    for(const s of LADDER) if(s>=needed){ want=s; break; }
+    // 段が1つ違うだけでは動かさない。明るさのゆらぎで往復するのを防ぐ
+    const cur=LADDER.indexOf(AUTO.avg), tgt=LADDER.indexOf(want);
+    const now=Date.now();
+    if(AUTO.at===0){ AUTO.avg=want; AUTO.at=now; }        // 起動直後は一気に必要な枚数まで上げる
+    else if(tgt!==cur && now-AUTO.at>2500){
+      if(tgt>cur) AUTO.avg=LADDER[cur+1];                 // 暗くなった側へは1段ずつ上げる
+      else if(cur-tgt>=2) AUTO.avg=LADDER[cur-1];         // 明るくなった側は慎重に下げる
+      AUTO.at=now;
+    }
   }
-  return {gray, w:tw, h:th, raw:imgData};
+  showAutoState();
+}
+function showAutoState(){
+  const el=$('llAuto'); if(!el) return;
+  const bits=[];
+  bits.push('明るさ '+Math.round(AUTO.level)+'/255');
+  bits.push('明暗の幅 '+Math.round(AUTO.span));
+  bits.push('ノイズ ±'+AUTO.noise.toFixed(1));
+  bits.push(isAutoAvg() ? '自動で'+AUTO.avg+'枚平均' : llAvgN()+'枚平均');
+  if(expoTrack && $('expoAuto') && $('expoAuto').value==='1')
+    bits.push('露出 '+(Number($('expo').value)/100).toFixed(1));
+  el.textContent='自動調整の状態：'+bits.join(' ／ ');
+}
+setInterval(updateAuto, 700);
+
+// 露出は行き過ぎないよう、少しずつ・間を置いて動かす
+function autoExposure(level){
+  if(!expoTrack || !$('expoAuto') || $('expoAuto').value!=='1') return;
+  const now=Date.now();
+  if(now-AUTO.expoAt < 4000) return;
+  if(level>=70 && level<=185) return;              // 十分な明るさ。触らない
+  const e=$('expo');
+  const step=Number(e.step)||1;
+  const cur=Number(e.value);
+  const next=Math.max(Number(e.min), Math.min(Number(e.max), cur + (level<70 ? step*2 : -step*2)));
+  if(next===cur) return;
+  e.value=next; $('expoV').textContent=(next/100).toFixed(1);
+  expoTrack.applyConstraints({advanced:[{exposureCompensation:next/100}]}).catch(()=>{});
+  AUTO.expoAt=now;
+  RING.frames.length=0;                            // 明るさが変わるので溜めた画像は捨てる
+}
+
+// 横方向・縦方向に順番にならす箱ぼかし。照明ムラだけを取り出すのに使う
+function boxBlur(src, w, h, r){
+  const tmp=new Float32Array(w*h), out=new Float32Array(w*h);
+  for(let y=0;y<h;y++){
+    let sum=0; const o=y*w;
+    for(let x=-r;x<=r;x++) sum+=src[o+Math.min(w-1,Math.max(0,x))];
+    for(let x=0;x<w;x++){
+      tmp[o+x]=sum/(2*r+1);
+      sum-=src[o+Math.min(w-1,Math.max(0,x-r))];
+      sum+=src[o+Math.min(w-1,Math.max(0,x+r+1))];
+    }
+  }
+  for(let x=0;x<w;x++){
+    let sum=0;
+    for(let y=-r;y<=r;y++) sum+=tmp[Math.min(h-1,Math.max(0,y))*w+x];
+    for(let y=0;y<h;y++){
+      out[y*w+x]=sum/(2*r+1);
+      sum-=tmp[Math.min(h-1,Math.max(0,y-r))*w+x];
+      sum+=tmp[Math.min(h-1,Math.max(0,y+r+1))*w+x];
+    }
+  }
+  return out;
+}
+
+// 照明ムラを消し、明暗の幅を0〜255いっぱいに引き伸ばす
+function enhanceGray(f, w, h, mode){
+  const n=w*h;
+  const st={span:255, gain:1, flat:false, weak:false};
+  let a=f;
+  if(mode>=2){
+    // 数字の線より十分大きいぼかしを引く。細い線は残り、影の傾きだけが消える
+    const r=Math.max(2, Math.round(h*0.55));
+    const bg=boxBlur(f,w,h,r);
+    let m=0; for(let i=0;i<n;i++) m+=f[i]; m/=n;
+    a=new Float32Array(n);
+    for(let i=0;i<n;i++) a[i]=f[i]-bg[i]+m;
+    st.flat=true;
+  }
+  const out=new Uint8Array(n);
+  // 伸ばすときの基準を、表示された数字の内容に左右されないものにする。
+  // 上下◯%で決めると、点灯セグメントの多い少ないで基準ごと動いてしまうため、
+  // 「一番よく出てくる明るさ＝液晶の地の色」を片方の杭にする
+  const hist=new Int32Array(256);
+  for(let i=0;i<n;i++){ const v=a[i]; hist[v<0?0:v>255?255:v|0]++; }
+  let acc=0, p2=0, p98=255;
+  for(let v=0;v<256;v++){ acc+=hist[v]; if(acc>=n*0.02){ p2=v; break; } }
+  acc=0;
+  for(let v=255;v>=0;v--){ acc+=hist[v]; if(acc>=n*0.02){ p98=v; break; } }
+  // ノイズで山が割れないよう、少しならしてから一番高い山を探す
+  let bg=0, bestC=-1;
+  for(let v=2;v<254;v++){
+    const c=hist[v-2]+hist[v-1]*2+hist[v]*3+hist[v+1]*2+hist[v+2];
+    if(c>bestC){ bestC=c; bg=v; }
+  }
+  // 地の色から遠いほうの裾を、もう片方の杭にする（黒地に明るい数字でも成り立つ）
+  let lo, hi;
+  if(bg-p2 >= p98-bg){ lo=p2; hi=Math.max(p2+1, bg); }
+  else { lo=Math.min(p98-1, bg); hi=p98; }
+  const span=Math.max(1, hi-lo);
+  st.span=span;
+  if(mode<=0){
+    for(let i=0;i<n;i++){ const v=a[i]; out[i]= v<0?0:v>255?255:v|0; }
+    return {gray:out, stats:st};
+  }
+  // 幅が狭すぎるときに伸ばしすぎるとノイズだけが暴れる。倍率に上限をつける
+  const gain=Math.min(255/span, 8);
+  st.gain=gain;
+  st.weak = span<10;
+  for(let i=0;i<n;i++){ const v=(a[i]-lo)*gain; out[i]= v<0?0:v>255?255:v|0; }
+  return {gray:out, stats:st};
+}
+
+function grabROI(){
+  const spec=roiSpec();
+  if(!spec) return null;
+  const cur=captureGray(spec);
+  let f=cur.g, used=1, noise=0, changed=false;
+  const want=llAvgN();
+  if(want>1 && RING.key===spec.key && RING.frames.length>1 && Date.now()-RING.t<2000){
+    const fs=RING.frames;
+    const k=Math.min(want, fs.length);
+    const acc=new Float32Array(f.length);
+    for(let j=fs.length-k;j<fs.length;j++){ const fr=fs[j]; for(let i=0;i<acc.length;i++) acc[i]+=fr[i]; }
+    for(let i=0;i<acc.length;i++) acc[i]/=k;
+    // 1枚と平均のズレ。ノイズなら小さく、日が差した直後なら大きく出る
+    let d=0; for(let i=0;i<acc.length;i++) d+=Math.abs(f[i]-acc[i]);
+    noise=d/acc.length;
+    // 雲が切れた、照明が点いた等。古い画像を混ぜると像がにじむので捨てる
+    if(noise > Math.max(14, AUTO.span*0.30) && AUTO.noise>0 && noise > AUTO.noise*3){
+      RING.frames.length=0;
+      changed=true;
+    } else {
+      f=acc; used=k;
+    }
+  }
+  const mode=llMode();
+  const {gray, stats}=enhanceGray(f, spec.tw, spec.th, mode);
+  stats.frames=used; stats.noise=noise; stats.mode=mode; stats.changed=changed;
+  return {gray, w:spec.tw, h:spec.th, raw:cur.raw, stats};
 }
 function otsu(gray){
   const hist=new Array(256).fill(0);
@@ -1048,9 +1353,14 @@ function calibrate(expected){
   if(!on.length || !off.length)
     return {ok:false, why:'全部同じ数字だと基準を学べません。数字がばらけているときに校正してください'};
   const mOn=on.reduce((a,b)=>a+b,0)/on.length, mOff=off.reduce((a,b)=>a+b,0)/off.length;
-  if(Math.abs(mOn-mOff) < 6)
-    return {ok:false, why:'明暗の差が小さすぎます。格子が数字に合っているか、照明を確認してください'};
-  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dotAt, slant:Number($('gS').value)/10, italic:Number($('gI').value)/100 };
+  // 暗所補正をかけたあとの明暗差で判断する。ノイズより十分大きければ読める
+  const noise=(src.stats && src.stats.noise) || 0;
+  const need=Math.max(4, noise*1.5);
+  if(Math.abs(mOn-mOff) < need)
+    return {ok:false, why:'明暗の差が小さすぎます（差 '+Math.abs(mOn-mOff).toFixed(0)+'／必要 '+need.toFixed(0)
+      +'）。格子の位置を確かめ、「暗所補正＝強」「時間平均＝16枚」を試してください'};
+  S.cal={ cells, mOn, mOff, dark:mOn<mOff, n:chars.length, dec:dotAt, slant:Number($('gS').value)/10, italic:Number($('gI').value)/100,
+          ll:llMode(), avg:llAvgN(), at:Date.now() };
   saveMeta();
   return {ok:true, n:chars.length};
 }
@@ -1070,16 +1380,26 @@ function readCalibrated(){
     per.push({cell,g}); all.push(...g);
   }
   // フレームごとに境界を引き直す。分離度が低い＝全桁同じ状態なので校正値を使う
+  // 暗い場所では分離度が中途半端な値になりやすいので、その間は両者の中間を取る
   const o=otsuOn(all);
-  let th = (o.th===null || o.eta < 0.55) ? (cal.mOn+cal.mOff)/2 : o.th;
+  const calTh=(cal.mOn+cal.mOff)/2;
+  let th;
+  if(o.th===null || o.eta<0.35) th=calTh;
+  else if(o.eta>=0.55) th=o.th;
+  else th=(o.th+calTh)/2;
   const dark=cal.dark;
   const need = Number($('segTh').value)/100;
   let text='';
   const boxes=[];
   const detail=[];
+  let gap=Infinity;      // 境界から一番近いセグメントまでの距離。小さいほど危うい
+  const onVals=[], offVals=[];
   per.forEach(({cell,g})=>{
     let bits='';
-    for(let k=0;k<7;k++) bits += (dark ? (g[k]<th) : (g[k]>th)) ? '1':'0';
+    for(let k=0;k<7;k++){
+      bits += (dark ? (g[k]<th) : (g[k]>th)) ? '1':'0';
+      gap=Math.min(gap, Math.abs(g[k]-th));
+    }
     let kind, ch;
     if(SEGMAP[bits]){ ch=SEGMAP[bits]; kind=ch; }
     else {
@@ -1098,6 +1418,9 @@ function readCalibrated(){
       else { ch='?'; kind='?'+res[0].d+':'+margin.toFixed(2); }
     }
     text += ch;
+    // 読めた数字の形から、点灯・消灯それぞれの明るさを集めておく
+    const known=PAT[ch];
+    if(known) for(let k=0;k<7;k++) (known[k]==='1'?onVals:offVals).push(g[k]);
     detail.push({g:g.slice(), bits, ch});
     boxes.push({x0:cell.x0, y0:cell.y0, w:cell.w, h:cell.h, kind});
   });
@@ -1129,7 +1452,29 @@ function readCalibrated(){
       if(rate>jump) return {ok:false, why:'急に変わりすぎ '+str+'（'+rate.toFixed(0)+'°C/分）', src, boxes};
     }
   }
-  return {ok:true, value:v, str, src, boxes, text};
+  // 日差しの変化で基準はゆっくりずれるので、読み取りに合わせて直していく。
+  // ただし「覚えた基準に頼って読んだ結果」から学ぶと、基準がじわじわ潰れて
+  // やがて何も読めなくなる。そのフレーム自身が明暗をはっきり分けられたとき、
+  // つまり覚えた基準に頼らずに読めたときだけ学ぶ
+  if(o.th!==null && o.eta>=0.55 && onVals.length && offVals.length){
+    const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+    const nOn=mean(onVals), nOff=mean(offVals);
+    if(!cal.sep0) cal.sep0=Math.abs(cal.mOn-cal.mOff);
+    const sep0=cal.sep0;
+    // 明暗が校正時の半分を切る、または明暗が逆転しているときは信用しない
+    if(Math.abs(nOn-nOff) > sep0*0.5 && (nOn<nOff)===cal.dark){
+      const a=0.05;
+      cal.mOn  += (nOn - cal.mOn )*a;
+      cal.mOff += (nOff- cal.mOff)*a;
+      // 差が縮みも広がりもしすぎないよう、校正時の0.6〜2倍に収める
+      const mid=(cal.mOn+cal.mOff)/2;
+      const half=Math.max(sep0*0.3, Math.min(sep0, Math.abs(cal.mOn-cal.mOff)/2));
+      const s=cal.dark ? -1 : 1;
+      cal.mOn=mid+s*half; cal.mOff=mid-s*half;
+      S.calDirty=true;
+    }
+  }
+  return {ok:true, value:v, str, src, boxes, text, gap, eta:o.eta};
 }
 
 function readFrame(){
@@ -1177,7 +1522,8 @@ function readFrameAuto(){
   return {ok:true, value:v, str, B, boxes, text};
 }
 function burstRead(){
-  const n=Number($('burst').value);
+  // 時間平均が効いているときは、続けて読んでも同じ平均画像を見るだけなので1回でよい
+  const n = llAvgN()>1 ? 1 : Number($('burst').value);
   const votes={}; let last=null;
   for(let i=0;i<n;i++){
     const r=readFrame(); last=r;
@@ -1226,15 +1572,28 @@ function previewGrid(){
   if(!src) return;
   const n=($('calVal').value.replace(/[^0-9]/g,'').length)||3;
   drawGrid(src, gridCells(n), '#33c76e');
-  dbg.width=1; dbg.height=1;
+  paintEnhanced(src);
   $('dbgInfo').textContent='格子を1マスに数字1つずつ合わせてください（'+n+'マス表示中）';
+}
+
+// 補正後の白黒画像を見せる。ここで数字がはっきりしていれば読める
+function paintEnhanced(src){
+  if(!src || !src.gray){ dbg.width=1; dbg.height=1; return; }
+  const {gray,w,h}=src;
+  dbg.width=w; dbg.height=h;
+  const im=dctx.createImageData(w,h);
+  for(let i=0;i<w*h;i++){
+    const v=gray[i];
+    im.data[i*4]=v; im.data[i*4+1]=v; im.data[i*4+2]=v; im.data[i*4+3]=255;
+  }
+  dctx.putImageData(im,0,0);
 }
 
 function paintDebug(r){
   if(r && r.src){
     // 校正済み：切り出し画像に判定セルを重ねる
     drawGrid(r.src, S.cal ? S.cal.cells : null, r.ok ? '#33c76e' : '#d9634a');
-    dbg.width=1; dbg.height=1;
+    paintEnhanced(r.src);
   } else if(r && r.B){
     // 未校正の自動モード：二値化画像も見せる
     const {bin,w,h}=r.B;
@@ -1524,6 +1883,8 @@ function tick(){
       if(S.pending!==r.value && S.last!==r.value){ S.pending=r.value; return; }
       S.pending=null; S.last=r.value;
       S.ok++; S.fails=0;
+      // 追従で動いた明るさの基準を、ときどき保存しておく
+      if(S.calDirty && S.ok%30===0){ S.calDirty=false; saveMeta(); }
       const rec=[Date.now(), r.value];
       S.points.push(rec);
       if(gsUrl()) gsQueue.push(rec);
@@ -1535,7 +1896,13 @@ function tick(){
       if(now-lastDraw > 1500){ lastDraw=now; redraw(); }
     }else{
       S.ng++; S.fails++;
-      if(S.fails===5) showAlert('5回続けて読み取れません。枠の位置、ピント、照明を確認してください。');
+      // 読めないときは、まず平均枚数を上げて粘る。光が急に変わった直後はこれで戻ることが多い
+      if(isAutoAvg() && S.fails>=2){
+        const i=LADDER.indexOf(AUTO.avg);
+        if(i>=0 && i<LADDER.length-1){ AUTO.avg=LADDER[i+1]; AUTO.at=Date.now(); }
+        RING.frames.length=0;
+      }
+      if(S.fails===8) showAlert('8回続けて読み取れません。枠の位置、ピント、温度計が動いていないかを確認してください。');
     }
     $('cntOk').textContent=S.ok; $('cntNg').textContent=S.ng;
   } finally { ticking=false; }
@@ -1556,6 +1923,46 @@ function stop(){
 }
 $('btnStart').onclick = ()=> S.running ? stop() : start();
 $('btnTest').onclick = ()=>{ if(S.cal) paintDebug(burstRead()); else previewGrid(); };
+
+/* ---------- 暗所補正の操作と診断 ---------- */
+function llShow(msg){ $('llState').textContent=msg; }
+for(const id of ['llMode','llAvg']){
+  $(id).addEventListener('change', ()=>{
+    RING.frames.length=0; RING.key='';          // 設定が変わったら貯めた画像を捨てる
+    saveMeta();
+    // 平均枚数は明るさの基準を動かさないので、警告は補正のかけ方を変えたときだけ
+    if(S.cal && S.cal.ll!==llMode())
+      llShow('補正のかけ方を変えました。明るさの基準がずれるので、今の表示を入れて校正し直してください。');
+    if(S.cal) paintDebug(readFrame()); else previewGrid();
+  });
+}
+$('btnDiag').onclick = ()=>{
+  const src=grabROI();
+  if(!src){ llShow('カメラが動いていません。「カメラを開始」を押してください。'); return; }
+  const st=src.stats||{};
+  const parts=[];
+  parts.push((st.frames>1 ? st.frames+'枚を平均' : '平均なし'));
+  parts.push('ノイズ ±'+(st.noise||0).toFixed(1));
+  parts.push('補正前の明暗の幅 '+Math.round(st.span)+'/255');
+  parts.push('引き伸ばし '+(st.gain||1).toFixed(1)+'倍');
+  let advice='';
+  if(!S.cal){
+    advice='　まず今の表示を入力して校正してください。校正は明るいうちに一度で構いません。';
+  }else{
+    const r=readCalibrated();
+    if(r.ok){
+      const margin=r.gap/Math.max(1,Math.abs(S.cal.mOn-S.cal.mOff)/2);
+      parts.push('判定の余裕 '+(margin*100).toFixed(0)+'%');
+      advice = margin>0.35 ? '　余裕があります。この明るさなら放っておいて大丈夫です。'
+             : margin>0.15 ? '　やや際どいですが、暗くなれば平均枚数が自動で増えます。温度計とスマホの固定を確かめてください。'
+                           : '　余裕がありません。自動調整の限界です。手元灯を足すか、ライトを斜めから当ててください。';
+    }else{
+      advice='　今は読めていません（'+r.why+'）。';
+    }
+  }
+  llShow(parts.join(' ／ ')+'。'+advice);
+  if(S.cal) paintDebug(readFrame()); else previewGrid();
+};
 function showCal(){
   $('calState').textContent = S.cal
     ? '校正済み：'+S.cal.n+'桁。ズレたと感じたら、今の表示を入れて校正し直してください。'
@@ -1624,7 +2031,7 @@ $('btnFit').onclick = ()=>{
 
 /* ---------- 保存 ---------- */
 async function saveMeta(){
-  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsSentTs:gsSentTs, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value, vMin:$('vMin').value, vMax:$('vMax').value, vJump:$('vJump').value}), false); }catch(e){}
+  try{ await STORE.set('tmeta', JSON.stringify({cal:S.cal, gsUrl:$('gsUrl').value, gsEvery:$('gsEvery').value, gsSentTs:gsSentTs, gsRemote:$('gsRemote').value, grid:{l:$('gL').value,r:$('gR').value,t:$('gT').value,b:$('gB').value,s:$('gS').value,cw:$('gW').value,d:$('gD').value,i:$('gI').value}, roi:S.roi, interval:$('interval').value, llMode:$('llMode').value, llAvg:$('llAvg').value, thOff:$('thOff').value, segTh:$('segTh').value, decimals:$('decimals').value, burst:$('burst').value, vMin:$('vMin').value, vMax:$('vMax').value, vJump:$('vJump').value}), false); }catch(e){}
 }
 async function flush(){
   try{
@@ -1648,6 +2055,8 @@ async function load(){
       if(o.grid){ $('gL').value=o.grid.l; $('gR').value=o.grid.r; $('gT').value=o.grid.t; $('gB').value=o.grid.b; if(o.grid.s!==undefined) $('gS').value=o.grid.s; if(o.grid.cw!==undefined) $('gW').value=o.grid.cw; if(o.grid.d!==undefined) $('gD').value=o.grid.d; if(o.grid.i!==undefined) $('gI').value=o.grid.i; }
       if(o.roi) S.roi=o.roi;
       if(o.interval)$('interval').value=o.interval;
+      if(o.llMode!==undefined)$('llMode').value=o.llMode;
+      if(o.llAvg!==undefined)$('llAvg').value=o.llAvg;
       if(o.thOff)$('thOff').value=o.thOff;
       if(o.segTh)$('segTh').value=o.segTh;
       if(o.decimals)$('decimals').value=o.decimals;
